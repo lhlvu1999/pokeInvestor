@@ -217,6 +217,7 @@ def upsert_video(
     channel_id: str,
     channel_title: str | None,
     published_at: datetime | None,
+    duration_sec: int | None = None,
 ) -> bool:
     """Insert a video if it's new; otherwise refresh title/source attribution.
     Returns True iff the row didn't previously exist.
@@ -225,8 +226,9 @@ def upsert_video(
         cur.execute(
             """
             INSERT INTO youtube_videos
-              (video_id, source_id, title, channel_id, channel_title, published_at)
-            VALUES (%s, %s, %s, %s, %s, %s)
+              (video_id, source_id, title, channel_id, channel_title,
+               published_at, duration_sec)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (video_id) DO UPDATE
               SET
                   -- Title rule: RSS data is authoritative (always current);
@@ -249,10 +251,16 @@ def upsert_video(
                   -- Don't overwrite a real date with NULL: backfill goes
                   -- first with no date, then a later RSS discover fills it.
                   published_at = COALESCE(EXCLUDED.published_at,
-                                          youtube_videos.published_at)
+                                          youtube_videos.published_at),
+                  -- Same COALESCE story for duration: backfill (flat extract)
+                  -- has it, RSS doesn't — never let a NULL overwrite a real
+                  -- value.
+                  duration_sec = COALESCE(EXCLUDED.duration_sec,
+                                          youtube_videos.duration_sec)
             RETURNING (xmax = 0) AS inserted
             """,
-            (video_id, source_id, title, channel_id, channel_title, published_at),
+            (video_id, source_id, title, channel_id, channel_title,
+             published_at, duration_sec),
         )
         row = cur.fetchone()
         return bool(row and row["inserted"])

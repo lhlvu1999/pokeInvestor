@@ -124,6 +124,7 @@ def _backfill_by_count(source: src_repo.Source) -> int:
             channel_id=source.external_id,
             channel_title=channel_title,
             published_at=None,
+            duration_sec=_coerce_duration(entry.get("duration")),
         )
         if inserted:
             added += 1
@@ -230,6 +231,13 @@ def _backfill_by_days(source: src_repo.Source) -> int:
                     or flat_channel_title
                 ),
                 published_at=published_at,
+                # Duration is reliably in flat entries; the per-video extract
+                # also returns it. Prefer the more recent (per-video) but fall
+                # back to flat.
+                duration_sec=(
+                    _coerce_duration(info.get("duration"))
+                    or _coerce_duration(entry.get("duration"))
+                ),
             )
             if inserted:
                 added += 1
@@ -285,6 +293,20 @@ def _extract_video_id(entry: dict[str, Any]) -> str | None:
     if isinstance(vid, str) and len(vid) == 11:
         return vid
     return None
+
+
+def _coerce_duration(value: Any) -> int | None:
+    """yt-dlp returns `duration` as a float (seconds), sometimes None for
+    live or scheduled videos. Coerce to integer seconds; return None for
+    missing or non-numeric input.
+    """
+    if value is None:
+        return None
+    try:
+        secs = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return secs if secs > 0 else None
 
 
 def _parse_upload_date(yyyymmdd: str) -> datetime | None:
