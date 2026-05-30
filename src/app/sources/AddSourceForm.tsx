@@ -9,7 +9,7 @@ import type { YoutubeBackfillMode } from "@/db/schema";
 const DEFAULT_COUNT = "100";
 const DEFAULT_DAYS = "180";
 
-export function AddSourceForm() {
+export function AddSourceForm({ onAdded }: { onAdded?: () => void } = {}) {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [title, setTitle] = useState("");
@@ -72,6 +72,7 @@ export function AddSourceForm() {
       setCount(DEFAULT_COUNT);
       setDays(DEFAULT_DAYS);
       router.refresh();
+      onAdded?.();
     });
   }
 
