@@ -67,6 +67,29 @@ class Settings:
     callers should read `llm_temperature_override` together with this.
     """
 
+    transcript_method: str
+    """Which engine fetches transcripts.
+      - `youtube_captions` (default): scrape YouTube's timedtext endpoint
+        via youtube-transcript-api. Fast, free, IP-block prone.
+      - `whisper`: download audio via yt-dlp + transcribe with local
+        faster-whisper. Slower, no API key, no IP-block on the caption
+        endpoint (audio download path may still be rate-limited).
+    """
+    whisper_model_size: str
+    """faster-whisper model name: tiny | base | small | medium | large-v3.
+    Bigger = more accurate + slower + larger download.
+    Apple Silicon defaults: `small` is the sweet spot.
+    """
+    whisper_device: str
+    """`auto` | `cpu` | `cuda`. `auto` lets faster-whisper pick the best
+    available — typically GPU on a CUDA box, CPU elsewhere. (Metal / MPS
+    is not currently supported by CTranslate2; macOS runs on CPU.)
+    """
+    whisper_compute_type: str
+    """CTranslate2 compute type. `int8` is the right default on CPU
+    (smallest memory, fastest). `float16` for GPU. `auto` lets the
+    library decide.
+    """
     yt_transcript_cookies_path: str | None
     """Path to a Netscape-format cookies file exported from a browser
     where you're logged into YouTube. Passed to youtube-transcript-api
@@ -140,6 +163,10 @@ def load_settings() -> Settings:
         llm_model_override=model_override,
         llm_temperature_override=temp_value,
         llm_temperature_force_null=temp_force_null,
+        transcript_method=(_optional("TRANSCRIPT_METHOD") or "youtube_captions"),
+        whisper_model_size=(_optional("WHISPER_MODEL_SIZE") or "small"),
+        whisper_device=(_optional("WHISPER_DEVICE") or "auto"),
+        whisper_compute_type=(_optional("WHISPER_COMPUTE_TYPE") or "int8"),
         yt_transcript_cookies_path=_optional("YT_TRANSCRIPT_COOKIES"),
         yt_transcript_proxy_url=_optional("YT_TRANSCRIPT_PROXY"),
         discover_max_per_source=int(_optional("PIPE_DISCOVER_MAX", "50") or "50"),

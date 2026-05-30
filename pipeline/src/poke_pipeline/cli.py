@@ -93,13 +93,32 @@ def cmd_transcripts(
             "your cookies / proxy work) before running the full batch."
         ),
     ),
+    method: str | None = typer.Option(
+        None,
+        "--method",
+        metavar="ENGINE",
+        help=(
+            "Override TRANSCRIPT_METHOD for this run: 'youtube_captions' "
+            "(scrape, IP-block prone) or 'whisper' (local audio + faster-"
+            "whisper). Use with --test to compare engines on the same video."
+        ),
+    ),
 ) -> None:
     """Fetch transcripts for any videos that don't have one yet."""
+    from poke_pipeline import whisper_transcribe
+    from poke_pipeline.config import load_settings
+
     try:
         if test is not None:
-            api = transcripts.build_api()
-            status, payload = transcripts._fetch_one(api, test)
+            settings = load_settings()
+            engine = (method or settings.transcript_method).lower()
+            if engine == "whisper":
+                status, payload = whisper_transcribe.transcribe(test, settings)
+            else:
+                api = transcripts.build_api()
+                status, payload = transcripts._fetch_one(api, test)
             typer.echo(f"video_id: {test}")
+            typer.echo(f"method:   {engine}")
             typer.echo(f"status:   {status}")
             if status == "ok":
                 length = len(payload.get("text") or "")
@@ -110,7 +129,7 @@ def cmd_transcripts(
                 err = payload.get("error_msg") or ""
                 typer.echo(f"error:    {err[:200]}")
             return
-        result = transcripts.run(retry_errors=retry_errors)
+        result = transcripts.run(retry_errors=retry_errors, method_override=method)
         typer.echo(
             f"transcripts: {result.fetched} fetched, "
             f"{result.missing} missing, {result.errored} errored"

@@ -25,6 +25,7 @@ from youtube_transcript_api import (  # type: ignore[import-untyped]
 )
 from youtube_transcript_api.proxies import GenericProxyConfig  # type: ignore[import-untyped]
 
+from poke_pipeline import whisper_transcribe
 from poke_pipeline.config import load_settings
 from poke_pipeline.db import connection
 
@@ -84,7 +85,10 @@ def _redact_proxy(url: str) -> str:
     return f"{scheme}://***:***@{hostpart}" if scheme else f"***:***@{hostpart}"
 
 
-def run(retry_errors: bool = False) -> TranscriptResult:
+def run(
+    retry_errors: bool = False,
+    method_override: str | None = None,
+) -> TranscriptResult:
     """Fetch transcripts for videos that don't have one yet.
 
     With `retry_errors=True`, also re-attempts rows previously stored as
@@ -93,22 +97,34 @@ def run(retry_errors: bool = False) -> TranscriptResult:
     retried (YouTube has explicitly told us captions are disabled; that
     won't change without a creator action).
     """
-    pending = _select_pending_videos(retry_errors=retry_errors)
-    if retry_errors:
-        log.info(
-            "transcripts: %d video(s) pending (including previously errored)",
-            len(pending),
+    settings = load_settings()
+    method = (method_override or settings.transcript_method).lower()
+    if method not in {"youtube_captions", "whisper"}:
+        raise ValueError(
+            f"invalid transcript_method {method!r}; expected "
+            f"'youtube_captions' or 'whisper'"
         )
-    else:
-        log.info("transcripts: %d pending video(s)", len(pending))
 
-    # Build the API client *once* so cookies / proxy config are reused
-    # across every fetch in the run (and not reconstructed 119 times).
-    api = build_api()
+    pending = _select_pending_videos(retry_errors=retry_errors)
+    log.info(
+        "transcripts: %d video(s) pending · method=%s%s",
+        len(pending),
+        method,
+        " (including previously errored)" if retry_errors else "",
+    )
+
+    # Build the captions client up front when we'll use it. Build a single
+    # Whisper model up front too — first call loads it from disk (slow);
+    # subsequent calls reuse the cached instance.
+    api = build_api() if method == "youtube_captions" else None
 
     fetched = missing = errored = 0
     for video_id in pending:
-        status, payload = _fetch_one(api, video_id)
+        if method == "whisper":
+            status, payload = whisper_transcribe.transcribe(video_id, settings)
+        else:
+            assert api is not None
+            status, payload = _fetch_one(api, video_id)
         _record(video_id, status, payload)
         if status == "ok":
             fetched += 1
