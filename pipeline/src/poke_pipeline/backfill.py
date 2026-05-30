@@ -110,7 +110,7 @@ def _backfill_by_count(source: src_repo.Source) -> int:
     most-recent 15 via RSS.
     """
     cap = min(source.backfill_max_videos, _ABSOLUTE_MAX_VIDEOS)
-    entries = _list_channel_videos(source.external_id, cap=cap)
+    channel_title, entries = _list_channel_videos(source.external_id, cap=cap)
 
     added = 0
     for entry in entries:
@@ -122,7 +122,7 @@ def _backfill_by_count(source: src_repo.Source) -> int:
             source_id=source.id,
             title=str(entry.get("title") or ""),
             channel_id=source.external_id,
-            channel_title=None,
+            channel_title=channel_title,
             published_at=None,
         )
         if inserted:
@@ -150,7 +150,9 @@ def _backfill_by_days(source: src_repo.Source) -> int:
     cutoff = datetime.now(tz=UTC) - timedelta(days=source.backfill_days)
     cutoff_yyyymmdd = cutoff.strftime("%Y%m%d")
 
-    flat_entries = _list_channel_videos(source.external_id, cap=cap)
+    flat_channel_title, flat_entries = _list_channel_videos(
+        source.external_id, cap=cap
+    )
     if not flat_entries:
         return 0
 
@@ -219,7 +221,14 @@ def _backfill_by_days(source: src_repo.Source) -> int:
                 source_id=source.id,
                 title=str(info.get("title") or entry.get("title") or ""),
                 channel_id=source.external_id,
-                channel_title=info.get("channel") or info.get("uploader"),
+                # Per-video extract may not surface channel/uploader on some
+                # clients (esp. tv_embedded), so fall back to the channel-page
+                # name we captured from the flat list.
+                channel_title=(
+                    info.get("channel")
+                    or info.get("uploader")
+                    or flat_channel_title
+                ),
                 published_at=published_at,
             )
             if inserted:
@@ -231,8 +240,16 @@ def _backfill_by_days(source: src_repo.Source) -> int:
 # ─── helpers ────────────────────────────────────────────────────────────────
 
 
-def _list_channel_videos(channel_id: str, *, cap: int) -> list[dict[str, Any]]:
+def _list_channel_videos(
+    channel_id: str, *, cap: int
+) -> tuple[str | None, list[dict[str, Any]]]:
     """Single-HTTP flat enumeration of a channel's video tab.
+
+    Returns `(channel_title, entries)` — yt-dlp surfaces the channel's
+    display name at the top-level info dict (`info["channel"]` or
+    `info["uploader"]`), so we capture it here and let callers pass it
+    through to `upsert_video`. Without this, newly-backfilled rows that
+    never re-appear in RSS keep `channel_title = NULL` forever.
 
     Failure modes:
       - Channel not found / private: yt-dlp raises. Caller logs and moves on.
@@ -252,11 +269,15 @@ def _list_channel_videos(channel_id: str, *, cap: int) -> list[dict[str, Any]]:
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
     if not isinstance(info, dict):
-        return []
+        return None, []
+    channel_title_raw = info.get("channel") or info.get("uploader")
+    channel_title = (
+        channel_title_raw if isinstance(channel_title_raw, str) else None
+    )
     entries = info.get("entries")
     if not isinstance(entries, list):
-        return []
-    return [e for e in entries if isinstance(e, dict)]
+        return channel_title, []
+    return channel_title, [e for e in entries if isinstance(e, dict)]
 
 
 def _extract_video_id(entry: dict[str, Any]) -> str | None:
