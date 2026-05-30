@@ -29,6 +29,13 @@
       "when": 1780155000000,
       "tag": "0003_count_based_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780165000000,
+      "tag": "0004_backfill_mode",
+      "breakpoints": true
     }
   ]
 }

@@ -187,6 +187,11 @@ export const mentionSentimentEnum = pgEnum("mention_sentiment", [
   "mixed",
 ]);
 
+export const youtubeBackfillModeEnum = pgEnum("youtube_backfill_mode", [
+  "count",
+  "days",
+]);
+
 /**
  * LLM prompts, versioned and editable from the admin UI. Editing the prompt
  * in the UI inserts a new row with `version + 1` and atomically flips
@@ -253,23 +258,33 @@ export const youtubeSources = pgTable(
       .notNull(),
     lastDiscoveredAt: timestamp("last_discovered_at", { withTimezone: true }),
     /**
-     * Max videos to fetch when the source is first added. The pipeline uses
-     * yt-dlp's *flat* channel-listing extraction (no per-video request, no
-     * API key, sidesteps YouTube's anti-bot wall) to grab this many recent
-     * videos in newest-first order. After backfill completes, ongoing
-     * discovery falls back to the cheap RSS feed (~15 most recent only).
-     *
-     * Date-range backfill (e.g. "last 180 days") is not viable without auth
-     * — YouTube's bot wall blocks the per-video metadata calls needed to
-     * read upload dates. We trade exact date filtering for a reliable
-     * count-based depth instead.
+     * Which depth heuristic the `backfill` phase uses for this source.
+     *  - `count`: fetch the N newest videos via yt-dlp flat extraction
+     *    (one HTTP per channel, no dates).
+     *  - `days`: fetch newest-first via flat list, then per-video extract
+     *    each (with `tv_embedded`/`android`/`mediaconnect` player-client
+     *    fallback) to read `upload_date`, stopping at the cutoff. Slower
+     *    and best-effort against YouTube's anti-bot wall; videos whose
+     *    extract fails are skipped (can't verify the date).
+     */
+    backfillMode: youtubeBackfillModeEnum("backfill_mode")
+      .notNull()
+      .default("count"),
+    /**
+     * Max videos to fetch in `count` mode. Also a hard cap for `days` mode
+     * so a runaway channel can't trigger thousands of per-video extracts.
      */
     backfillMaxVideos: integer("backfill_max_videos").notNull().default(100),
     /**
+     * Cutoff in days for `days` mode — fetch videos uploaded within the
+     * last N days. Ignored when `backfill_mode = 'count'`.
+     */
+    backfillDays: integer("backfill_days").notNull().default(180),
+    /**
      * Set the first time backfill finishes successfully. NULL means "not
-     * yet backfilled" — picked up by the `backfill` phase. Re-running
-     * (e.g. after raising `backfill_max_videos`) is a manual action that
-     * clears this column back to NULL.
+     * yet backfilled" — picked up by the `backfill` phase. Editing the
+     * mode/count/days clears this to NULL so the next run re-processes
+     * the source with the new settings.
      */
     backfilledAt: timestamp("backfilled_at", { withTimezone: true }),
   },
@@ -525,3 +540,5 @@ export type YoutubeTranscriptStatus =
   (typeof youtubeTranscriptStatusEnum.enumValues)[number];
 export type MentionSentiment =
   (typeof mentionSentimentEnum.enumValues)[number];
+export type YoutubeBackfillMode =
+  (typeof youtubeBackfillModeEnum.enumValues)[number];
