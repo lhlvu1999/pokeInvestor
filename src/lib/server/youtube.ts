@@ -20,21 +20,18 @@ export async function listYoutubeSources(): Promise<YoutubeSource[]> {
 /* Mutations                                                           */
 /* ------------------------------------------------------------------ */
 
-const addSchema = z.object({
+/** Shared by add + update: which backfill mode and the inputs it needs. */
+const backfillSettingsSchema = z.object({
+  backfillMode: z.enum(["count", "days"]).optional(),
+  /** Used in `count` mode. Also the hard cap in `days` mode. */
+  backfillMaxVideos: z.number().int().min(0).max(1000).optional(),
+  /** Used in `days` mode. Ignored otherwise. */
+  backfillDays: z.number().int().min(1).max(3650).optional(),
+});
+
+const addSchema = backfillSettingsSchema.extend({
   input: z.string().trim().min(1, "Paste a channel URL, @handle, or video URL"),
   title: z.string().trim().max(200).optional(),
-  /**
-   * Max videos to pull during one-shot historical backfill. The pipeline
-   * uses yt-dlp's flat channel extraction (no API key, no per-video calls)
-   * which means we trade date filtering for count-based depth. Capped at
-   * 1000 to keep the single HTTP request fast.
-   */
-  backfillMaxVideos: z
-    .number()
-    .int()
-    .min(0)
-    .max(1000)
-    .optional(),
 });
 
 export type AddYoutubeSourceInput = z.input<typeof addSchema>;
@@ -106,15 +103,84 @@ export async function addYoutubeSource(
       externalId,
       handle,
       title: parsed.data.title ?? resolvedTitle,
-      // Only override the schema default when the caller passed something.
+      // Only override schema defaults when the caller passed something.
+      ...(parsed.data.backfillMode !== undefined
+        ? { backfillMode: parsed.data.backfillMode }
+        : {}),
       ...(parsed.data.backfillMaxVideos !== undefined
         ? { backfillMaxVideos: parsed.data.backfillMaxVideos }
+        : {}),
+      ...(parsed.data.backfillDays !== undefined
+        ? { backfillDays: parsed.data.backfillDays }
         : {}),
     })
     .returning();
 
   revalidatePath("/sources");
   return { ok: true, data: inserted[0] };
+}
+
+const updateSchema = backfillSettingsSchema.extend({
+  id: z.string().uuid(),
+  /** When true (the default), clear `backfilled_at` so the next backfill
+   * cron re-processes this source with the new settings. */
+  requeueBackfill: z.boolean().default(true),
+});
+
+export type UpdateYoutubeSourceInput = z.input<typeof updateSchema>;
+
+/**
+ * Update the backfill settings on an existing source. Title, handle,
+ * external_id, and active state stay where they are — those have their
+ * own actions. Saving with `requeueBackfill: true` (default) clears
+ * `backfilled_at` so the next `backfill` cron picks the source up again
+ * with the new settings, even if it had been fully processed before.
+ */
+export async function updateYoutubeSource(
+  raw: UpdateYoutubeSourceInput,
+): Promise<ActionResult<YoutubeSource>> {
+  const parsed = updateSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input",
+    };
+  }
+
+  const updates: Partial<{
+    backfillMode: "count" | "days";
+    backfillMaxVideos: number;
+    backfillDays: number;
+    backfilledAt: Date | null;
+  }> = {};
+  if (parsed.data.backfillMode !== undefined) {
+    updates.backfillMode = parsed.data.backfillMode;
+  }
+  if (parsed.data.backfillMaxVideos !== undefined) {
+    updates.backfillMaxVideos = parsed.data.backfillMaxVideos;
+  }
+  if (parsed.data.backfillDays !== undefined) {
+    updates.backfillDays = parsed.data.backfillDays;
+  }
+  if (parsed.data.requeueBackfill) {
+    updates.backfilledAt = null;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return { ok: false, error: "Nothing to update." };
+  }
+
+  const [updated] = await db
+    .update(youtubeSources)
+    .set(updates)
+    .where(eq(youtubeSources.id, parsed.data.id))
+    .returning();
+  if (!updated) {
+    return { ok: false, error: "Source not found." };
+  }
+
+  revalidatePath("/sources");
+  return { ok: true, data: updated };
 }
 
 export async function removeYoutubeSource(

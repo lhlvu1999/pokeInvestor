@@ -1,37 +1,33 @@
 """Phase 0 — one-shot historical backfill for newly-added channels.
 
-The default `discover` phase uses YouTube's public RSS feed, which only
-exposes the ~15 most recent uploads per channel. For a daily-uploading
-channel that's two weeks of history; older videos are unreachable via
-RSS.
+Two depth modes per source (`youtube_sources.backfill_mode`):
 
-`backfill` fills the gap with **yt-dlp flat channel-listing extraction**:
-a single HTTP call to `https://www.youtube.com/channel/<id>/videos` that
-returns up to `backfill_max_videos` video IDs (newest first), each with a
-title and duration. We *don't* fetch per-video metadata, which is what
-trips YouTube's anti-bot wall.
+* **`count`** — flat channel-listing extract returns the N newest video
+  IDs in a single HTTP. Fast, no auth, no per-video calls; the trade-off
+  is that flat extract doesn't expose `upload_date` so backfilled rows
+  go in with `published_at = NULL`. Use this when you just want "the
+  last 100 videos, whatever they are".
 
-Trade-off: flat extract doesn't expose `upload_date`. Backfilled rows go
-in with `published_at = NULL` — `discover` later sets that column when
-the video re-appears in the channel's RSS feed (if recent enough). For
-backfilled-but-never-rediscovered rows, downstream queries sort with
-`COALESCE(published_at, discovered_at)`.
+* **`days`** — same flat list to get IDs in newest-first order, then a
+  per-video extract for each one to read `upload_date`, stopping at the
+  cutoff. Uses a multi-client player fallback
+  (`tv_embedded → android → mediaconnect`) to dodge YouTube's anti-bot
+  wall — which is intermittent rather than constant. Slower (~1s/video)
+  and best-effort: videos whose extract fails get skipped (can't enforce
+  a date filter without a date). Still capped by `backfill_max_videos`
+  as a safety net.
 
-Why this design over alternatives:
-  * Date-range filtering ("last 180 days") needs per-video extracts →
-    blocked by YouTube's bot wall as of 2026-05.
-  * Cookie-based auth bypasses the wall but is brittle and doesn't
-    survive in k8s without secret rotation.
-  * YouTube Data API v3 is rock-solid but requires a Google Cloud key.
-
-If you later need accurate dates, the right move is to add the Data API
-as an optional alternative, gated on `YOUTUBE_API_KEY` being present.
+After backfill completes (success or partial), `backfilled_at` is set so
+the source isn't re-processed on subsequent runs. To re-backfill, clear
+`backfilled_at = NULL` (the `/sources` edit UI does this when settings
+change).
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from yt_dlp import YoutubeDL  # type: ignore[import-untyped]
@@ -42,9 +38,13 @@ from poke_pipeline.discover import upsert_video
 log = logging.getLogger(__name__)
 
 
-# Hard ceiling regardless of per-source `backfill_max_videos`. Flat extract
-# of 1000 entries is one ~5 second HTTP request, so this is generous.
+# Hard ceiling on per-video extracts regardless of source settings. Protects
+# against a configuration error pointing us at a huge channel.
 _ABSOLUTE_MAX_VIDEOS = 1000
+
+# Player clients that historically work around YouTube's bot wall. Listed in
+# preference order — yt-dlp tries each and uses the first that succeeds.
+_PLAYER_CLIENT_FALLBACK = ["tv_embedded", "android", "mediaconnect"]
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,7 @@ def run() -> BackfillResult:
     processed = failed = added = 0
     for source in pending:
         if source.kind != "channel":
-            # Single-video sources: nothing to backfill; discover handles it.
+            # Single-video sources: nothing to backfill; discover handles them.
             src_repo.mark_backfilled(source.id)
             processed += 1
             continue
@@ -71,9 +71,10 @@ def run() -> BackfillResult:
             processed += 1
             added += count
             log.info(
-                "backfill: %s (%s) — %d video(s) added",
+                "backfill: %s (%s, mode=%s) — %d video(s) added",
                 source.title or source.external_id,
                 source.external_id,
+                source.backfill_mode,
                 count,
             )
         except Exception:
@@ -91,25 +92,31 @@ def run() -> BackfillResult:
     )
 
 
-# ─── per-source ─────────────────────────────────────────────────────────────
+# ─── per-source dispatch ────────────────────────────────────────────────────
 
 
 def _backfill_channel(source: src_repo.Source) -> int:
-    """Walk the channel's `/videos` page via yt-dlp's flat extraction,
-    upserting the first N entries. Returns count of *new* rows inserted
-    (existing rows are updated but not counted).
+    if source.backfill_mode == "days":
+        return _backfill_by_days(source)
+    return _backfill_by_count(source)
+
+
+# ─── count mode (fast, no dates) ────────────────────────────────────────────
+
+
+def _backfill_by_count(source: src_repo.Source) -> int:
+    """One HTTP, no per-video calls. Upserts the first N entries with
+    `published_at = NULL` — discover later fills the dates for the
+    most-recent 15 via RSS.
     """
     cap = min(source.backfill_max_videos, _ABSOLUTE_MAX_VIDEOS)
     entries = _list_channel_videos(source.external_id, cap=cap)
 
     added = 0
     for entry in entries:
-        video_id = entry.get("id")
-        if not isinstance(video_id, str) or len(video_id) != 11:
+        video_id = _extract_video_id(entry)
+        if video_id is None:
             continue
-        # `published_at` is None — flat extract doesn't give us upload dates.
-        # `channel_title` likewise isn't available here; discover will fill
-        # it in when the video re-appears in RSS.
         inserted = upsert_video(
             video_id=video_id,
             source_id=source.id,
@@ -120,8 +127,108 @@ def _backfill_channel(source: src_repo.Source) -> int:
         )
         if inserted:
             added += 1
+    return added
+
+
+# ─── days mode (best-effort, with dates) ────────────────────────────────────
+
+
+def _backfill_by_days(source: src_repo.Source) -> int:
+    """Iterate the channel's flat list newest-first, do a per-video extract
+    for each, stop when we cross the cutoff.
+
+    `backfill_max_videos` is the safety cap so a channel with thousands of
+    daily uploads can't trigger thousands of per-video HTTPs.
+
+    A per-video extract may fail (bot wall, deleted video, age-restricted).
+    Failures don't abort the run — we skip the video and continue. The
+    rationale: we cannot enforce a date cutoff for videos whose date we
+    couldn't read, so silently saving them would mean lying about the
+    "last N days" promise. Skipping is the honest choice.
+    """
+    cap = min(source.backfill_max_videos, _ABSOLUTE_MAX_VIDEOS)
+    cutoff = datetime.now(tz=UTC) - timedelta(days=source.backfill_days)
+    cutoff_yyyymmdd = cutoff.strftime("%Y%m%d")
+
+    flat_entries = _list_channel_videos(source.external_id, cap=cap)
+    if not flat_entries:
+        return 0
+
+    per_opts: dict[str, Any] = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "ignoreerrors": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": list(_PLAYER_CLIENT_FALLBACK),
+                "player_skip": ["webpage", "configs"],
+            },
+        },
+    }
+
+    added = 0
+    consecutive_failures = 0
+    with YoutubeDL(per_opts) as ydl:
+        for entry in flat_entries:
+            video_id = _extract_video_id(entry)
+            if video_id is None:
+                continue
+
+            info: dict[str, Any] | None
+            try:
+                info = ydl.extract_info(
+                    f"https://www.youtube.com/watch?v={video_id}",
+                    download=False,
+                )
+            except Exception as exc:
+                log.debug(
+                    "skip %s: per-video extract failed (%s)",
+                    video_id,
+                    exc,
+                )
+                info = None
+
+            if not isinstance(info, dict):
+                consecutive_failures += 1
+                # Bail early when the bot wall clamps us hard — every
+                # subsequent video would also fail. Better to mark the
+                # source backfilled-partial than spin uselessly.
+                if consecutive_failures >= 5:
+                    log.warning(
+                        "stopping backfill for %s: 5 consecutive extract "
+                        "failures, likely rate-limited",
+                        source.external_id,
+                    )
+                    break
+                continue
+            consecutive_failures = 0
+
+            upload_date = info.get("upload_date")
+            if not isinstance(upload_date, str):
+                # Some clients return videos without a publish date.
+                continue
+            if upload_date < cutoff_yyyymmdd:
+                # Flat list is newest-first, so we've crossed the cutoff.
+                # Everything after this is older — we're done.
+                break
+
+            published_at = _parse_upload_date(upload_date)
+            inserted = upsert_video(
+                video_id=video_id,
+                source_id=source.id,
+                title=str(info.get("title") or entry.get("title") or ""),
+                channel_id=source.external_id,
+                channel_title=info.get("channel") or info.get("uploader"),
+                published_at=published_at,
+            )
+            if inserted:
+                added += 1
 
     return added
+
+
+# ─── helpers ────────────────────────────────────────────────────────────────
 
 
 def _list_channel_videos(channel_id: str, *, cap: int) -> list[dict[str, Any]]:
@@ -150,3 +257,25 @@ def _list_channel_videos(channel_id: str, *, cap: int) -> list[dict[str, Any]]:
     if not isinstance(entries, list):
         return []
     return [e for e in entries if isinstance(e, dict)]
+
+
+def _extract_video_id(entry: dict[str, Any]) -> str | None:
+    vid = entry.get("id")
+    if isinstance(vid, str) and len(vid) == 11:
+        return vid
+    return None
+
+
+def _parse_upload_date(yyyymmdd: str) -> datetime | None:
+    """yt-dlp's `upload_date` is `YYYYMMDD` in UTC."""
+    if len(yyyymmdd) != 8 or not yyyymmdd.isdigit():
+        return None
+    try:
+        return datetime(
+            year=int(yyyymmdd[0:4]),
+            month=int(yyyymmdd[4:6]),
+            day=int(yyyymmdd[6:8]),
+            tzinfo=UTC,
+        )
+    except ValueError:
+        return None

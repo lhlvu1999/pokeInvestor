@@ -13,6 +13,7 @@ from typing import Literal
 from poke_pipeline.db import connection
 
 Kind = Literal["channel", "video"]
+BackfillMode = Literal["count", "days"]
 
 
 @dataclass(frozen=True)
@@ -21,7 +22,9 @@ class Source:
     kind: Kind
     external_id: str
     title: str | None
+    backfill_mode: BackfillMode
     backfill_max_videos: int
+    backfill_days: int
     backfilled_at: datetime | None
 
 
@@ -31,7 +34,9 @@ def _row_to_source(row: dict) -> Source:
         kind=row["kind"],
         external_id=row["external_id"],
         title=row["title"],
+        backfill_mode=row["backfill_mode"],
         backfill_max_videos=row["backfill_max_videos"],
+        backfill_days=row["backfill_days"],
         backfilled_at=row["backfilled_at"],
     )
 
@@ -44,7 +49,8 @@ def list_active_sources() -> list[Source]:
         cur.execute(
             """
             SELECT id::text AS id, kind, external_id, title,
-                   backfill_max_videos, backfilled_at
+                   backfill_mode, backfill_max_videos, backfill_days,
+                   backfilled_at
             FROM youtube_sources
             WHERE active = true
             ORDER BY added_at ASC
@@ -62,7 +68,8 @@ def list_sources_needing_backfill() -> list[Source]:
         cur.execute(
             """
             SELECT id::text AS id, kind, external_id, title,
-                   backfill_max_videos, backfilled_at
+                   backfill_mode, backfill_max_videos, backfill_days,
+                   backfilled_at
             FROM youtube_sources
             WHERE active = true AND backfilled_at IS NULL
             ORDER BY added_at ASC
