@@ -1,26 +1,117 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surface colors */
+  --background: #fafafa;
+  --foreground: #18181b;
+  --surface: #ffffff;
+  --surface-muted: #f4f4f5;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+
+  /* Brand */
+  --brand: #0f172a; /* slate-900 */
+  --brand-fg: #ffffff;
+
+  /* Semantic */
+  --success: #059669;
+  --success-bg: #ecfdf5;
+  --danger: #e11d48;
+  --danger-bg: #fff1f2;
+  --warning: #d97706;
+  --warning-bg: #fffbeb;
+  --info: #2563eb;
+  --info-bg: #eff6ff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #09090b;
+    --foreground: #f4f4f5;
+    --surface: #18181b;
+    --surface-muted: #27272a;
+    --border: #27272a;
+    --border-strong: #3f3f46;
+
+    --brand: #f4f4f5;
+    --brand-fg: #09090b;
+
+    --success: #34d399;
+    --success-bg: rgb(6 78 59 / 0.25);
+    --danger: #fb7185;
+    --danger-bg: rgb(136 19 55 / 0.25);
+    --warning: #fbbf24;
+    --warning-bg: rgb(120 53 15 / 0.25);
+    --info: #60a5fa;
+    --info-bg: rgb(30 58 138 / 0.25);
+  }
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border-base: var(--border);
+  --color-border-strong: var(--border-strong);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* Subtle hairline shadow used on cards and the header. */
+.shadow-card {
+  box-shadow:
+    0 1px 2px 0 rgb(0 0 0 / 0.04),
+    0 1px 3px 0 rgb(0 0 0 / 0.03);
+}
+
+.shadow-card-hover {
+  box-shadow:
+    0 4px 6px -1px rgb(0 0 0 / 0.07),
+    0 2px 4px -2px rgb(0 0 0 / 0.05);
+}
+
+@media (prefers-color-scheme: dark) {
+  .shadow-card {
+    box-shadow:
+      0 1px 2px 0 rgb(0 0 0 / 0.5),
+      0 0 0 1px rgb(255 255 255 / 0.02) inset;
+  }
+  .shadow-card-hover {
+    box-shadow:
+      0 4px 6px -1px rgb(0 0 0 / 0.5),
+      0 0 0 1px rgb(255 255 255 / 0.04) inset;
+  }
+}
+
+/* Numeric typography defaults — tables look way more professional with these. */
+table {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Better focus-visible across all interactive elements. */
+*:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Tighter scrollbars for inner-scrolling tables (webkit only). */
+.thin-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
 }

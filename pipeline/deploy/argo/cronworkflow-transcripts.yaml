@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: poke-pipeline-transcripts
+  labels:
+    app: poke-pipeline
+    phase: transcripts
+spec:
+  schedule: "*/15 * * * *"              # every 15 minutes
+  timezone: "UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  workflowSpec:
+    workflowTemplateRef:
+      name: poke-pipeline
+    arguments:
+      parameters:
+        - name: phase
+          value: transcripts

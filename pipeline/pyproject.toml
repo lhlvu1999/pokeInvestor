@@ -1,0 +1,56 @@
+[project]
+name = "poke-pipeline"
+version = "0.1.0"
+description = "YouTube transcript + LLM extraction pipeline for the Pokémon investor app."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = { text = "Proprietary" }
+authors = [{ name = "poke-investor maintainers" }]
+
+dependencies = [
+    "feedparser>=6.0.11",
+    "httpx>=0.27.0",
+    "openai>=1.54.0",
+    "psycopg[binary,pool]>=3.2.3",
+    "pydantic>=2.9.0",
+    "python-dotenv>=1.0.1",
+    "rapidfuzz>=3.10.0",
+    "typer>=0.12.5",
+    "youtube-transcript-api>=0.6.2",
+]
+
+[project.scripts]
+poke-pipeline = "poke_pipeline.cli:app"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13.0",
+    "pytest>=8.3.0",
+    "ruff>=0.7.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/poke_pipeline"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"] # line length handled by formatter
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+# psycopg's typing is incomplete for some adapters
+disable_error_code = ["misc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

@@ -32,6 +32,20 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# personal data exports — keep local
+/Pokemon business - exported.csv
+/poke-investor-transactions-*.csv
+
+# python pipeline artifacts
+/pipeline/.venv/
+/pipeline/.pytest_cache/
+/pipeline/.ruff_cache/
+/pipeline/.mypy_cache/
+__pycache__/
+
+# uv lock is checked in by convention — let it through
 
 # vercel
 .vercel

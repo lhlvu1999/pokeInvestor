@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: poke-pipeline-discover
+  labels:
+    app: poke-pipeline
+    phase: discover
+spec:
+  schedule: "0 * * * *"                 # hourly
+  timezone: "UTC"
+  concurrencyPolicy: Forbid             # never two discovery runs in flight
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  workflowSpec:
+    workflowTemplateRef:
+      name: poke-pipeline
+    arguments:
+      parameters:
+        - name: phase
+          value: discover

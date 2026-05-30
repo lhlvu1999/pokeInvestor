@@ -1,0 +1,64 @@
+# A single parameterized WorkflowTemplate keeps the three CronWorkflows DRY —
+# each just supplies a `phase` value. Secrets are pulled from `poke-pipeline`
+# (see secret.example.yaml).
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: poke-pipeline
+  labels:
+    app: poke-pipeline
+spec:
+  entrypoint: run
+  serviceAccountName: argo-workflow            # adjust to your cluster's SA
+  ttlStrategy:
+    secondsAfterCompletion: 86400              # purge succeeded pods after a day
+    secondsAfterFailure: 604800                # keep failed pods a week for debugging
+  podGC:
+    strategy: OnPodSuccess
+  arguments:
+    parameters:
+      - name: phase
+        description: "discover | transcripts | insights | all"
+  templates:
+    - name: run
+      inputs:
+        parameters:
+          - name: phase
+      retryStrategy:
+        limit: "2"
+        retryPolicy: "OnError"                 # network blips, not bad inputs
+        backoff:
+          duration: "30s"
+          factor: "2"
+      container:
+        image: ghcr.io/your-org/poke-pipeline:latest   # replace with your registry
+        imagePullPolicy: IfNotPresent
+        command: ["poke-pipeline"]
+        args:
+          - "{{inputs.parameters.phase}}"
+        env:
+          - name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: poke-pipeline
+                key: DATABASE_URL
+          - name: OPENAI_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: poke-pipeline
+                key: OPENAI_API_KEY
+                optional: true                 # only required for `insights`
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+          runAsNonRoot: true
+          runAsUser: 1000
