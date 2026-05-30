@@ -33,9 +33,23 @@ class TranscriptResult:
     errored: int
 
 
-def run() -> TranscriptResult:
-    pending = _select_pending_videos()
-    log.info("transcripts: %d pending video(s)", len(pending))
+def run(retry_errors: bool = False) -> TranscriptResult:
+    """Fetch transcripts for videos that don't have one yet.
+
+    With `retry_errors=True`, also re-attempts rows previously stored as
+    `status='error'` — useful after an IP-block / rate-limit episode that
+    has since expired. Rows recorded as `status='missing'` are *not*
+    retried (YouTube has explicitly told us captions are disabled; that
+    won't change without a creator action).
+    """
+    pending = _select_pending_videos(retry_errors=retry_errors)
+    if retry_errors:
+        log.info(
+            "transcripts: %d video(s) pending (including previously errored)",
+            len(pending),
+        )
+    else:
+        log.info("transcripts: %d pending video(s)", len(pending))
 
     fetched = missing = errored = 0
     for video_id in pending:
@@ -51,14 +65,22 @@ def run() -> TranscriptResult:
     return TranscriptResult(fetched=fetched, missing=missing, errored=errored)
 
 
-def _select_pending_videos() -> list[str]:
+def _select_pending_videos(*, retry_errors: bool) -> list[str]:
+    """Videos that need a fetch attempt this run. By default that's just
+    videos with no transcript row at all; with `retry_errors=True` we also
+    pull rows recorded as `status='error'` (rate-limited, IP-blocked,
+    transient failure). Rows stored as `status='missing'` are skipped
+    in both modes — YouTube told us the video genuinely has no captions.
+    """
+    extra_clause = "OR t.status = 'error'" if retry_errors else ""
     with connection() as conn, conn.cursor() as cur:
         cur.execute(
-            """
+            f"""
             SELECT v.video_id
             FROM youtube_videos v
             LEFT JOIN youtube_transcripts t ON t.video_id = v.video_id
             WHERE t.video_id IS NULL
+              {extra_clause}
             -- Backfilled videos have published_at NULL until RSS catches
             -- them; fall back to discovered_at so they don't all sort last.
             ORDER BY COALESCE(v.published_at, v.discovered_at) DESC

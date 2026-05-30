@@ -71,10 +71,21 @@ def cmd_discover() -> None:
 
 
 @app.command("transcripts")
-def cmd_transcripts() -> None:
+def cmd_transcripts(
+    retry_errors: bool = typer.Option(
+        False,
+        "--retry-errors",
+        help=(
+            "Also re-fetch videos previously recorded with status='error' "
+            "(e.g. rate-limit / IP-block failures). Wait for the block to "
+            "expire before using — usually hours. Rows with status='missing' "
+            "are NEVER retried — YouTube has confirmed captions are disabled."
+        ),
+    ),
+) -> None:
     """Fetch transcripts for any videos that don't have one yet."""
     try:
-        result = transcripts.run()
+        result = transcripts.run(retry_errors=retry_errors)
         typer.echo(
             f"transcripts: {result.fetched} fetched, "
             f"{result.missing} missing, {result.errored} errored"
