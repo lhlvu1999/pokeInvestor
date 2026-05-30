@@ -82,9 +82,34 @@ def cmd_transcripts(
             "are NEVER retried — YouTube has confirmed captions are disabled."
         ),
     ),
+    test: str | None = typer.Option(
+        None,
+        "--test",
+        metavar="VIDEO_ID",
+        help=(
+            "Diagnostic: try fetching a single video's transcript with the "
+            "current cookies/proxy config and print the result. Doesn't "
+            "touch the DB. Use to verify an IP-block has lifted (or that "
+            "your cookies / proxy work) before running the full batch."
+        ),
+    ),
 ) -> None:
     """Fetch transcripts for any videos that don't have one yet."""
     try:
+        if test is not None:
+            api = transcripts.build_api()
+            status, payload = transcripts._fetch_one(api, test)
+            typer.echo(f"video_id: {test}")
+            typer.echo(f"status:   {status}")
+            if status == "ok":
+                length = len(payload.get("text") or "")
+                lang = payload.get("language")
+                typer.echo(f"language: {lang}")
+                typer.echo(f"length:   {length} chars")
+            else:
+                err = payload.get("error_msg") or ""
+                typer.echo(f"error:    {err[:200]}")
+            return
         result = transcripts.run(retry_errors=retry_errors)
         typer.echo(
             f"transcripts: {result.fetched} fetched, "

@@ -11,8 +11,11 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from http.cookiejar import MozillaCookieJar
+from pathlib import Path
 from typing import Any
 
+import requests
 from youtube_transcript_api import (  # type: ignore[import-untyped]
     CouldNotRetrieveTranscript,
     NoTranscriptFound,
@@ -20,7 +23,9 @@ from youtube_transcript_api import (  # type: ignore[import-untyped]
     VideoUnavailable,
     YouTubeTranscriptApi,
 )
+from youtube_transcript_api.proxies import GenericProxyConfig  # type: ignore[import-untyped]
 
+from poke_pipeline.config import load_settings
 from poke_pipeline.db import connection
 
 log = logging.getLogger(__name__)
@@ -31,6 +36,52 @@ class TranscriptResult:
     fetched: int
     missing: int
     errored: int
+
+
+def build_api() -> YouTubeTranscriptApi:
+    """Construct the API client with whichever workaround is configured:
+    `YT_TRANSCRIPT_COOKIES` (path to Netscape cookies file) and/or
+    `YT_TRANSCRIPT_PROXY` (HTTP/SOCKS URL). With neither set, the client
+    runs unauthenticated and your IP is on its own against YouTube's
+    block heuristics.
+    """
+    settings = load_settings()
+    kwargs: dict[str, Any] = {}
+
+    if settings.yt_transcript_cookies_path:
+        path = Path(settings.yt_transcript_cookies_path).expanduser()
+        if not path.is_file():
+            log.warning(
+                "YT_TRANSCRIPT_COOKIES=%s does not exist; ignoring", path
+            )
+        else:
+            session = requests.Session()
+            jar = MozillaCookieJar(str(path))
+            jar.load(ignore_discard=True, ignore_expires=True)
+            session.cookies = jar  # type: ignore[assignment]
+            kwargs["http_client"] = session
+            log.info("transcripts: loaded cookies from %s", path)
+
+    if settings.yt_transcript_proxy_url:
+        kwargs["proxy_config"] = GenericProxyConfig(
+            http_url=settings.yt_transcript_proxy_url,
+            https_url=settings.yt_transcript_proxy_url,
+        )
+        log.info(
+            "transcripts: routing through proxy %s",
+            _redact_proxy(settings.yt_transcript_proxy_url),
+        )
+
+    return YouTubeTranscriptApi(**kwargs)
+
+
+def _redact_proxy(url: str) -> str:
+    """Strip credentials from a proxy URL before logging it."""
+    if "@" not in url:
+        return url
+    scheme, _, rest = url.partition("://")
+    _, _, hostpart = rest.partition("@")
+    return f"{scheme}://***:***@{hostpart}" if scheme else f"***:***@{hostpart}"
 
 
 def run(retry_errors: bool = False) -> TranscriptResult:
@@ -51,9 +102,13 @@ def run(retry_errors: bool = False) -> TranscriptResult:
     else:
         log.info("transcripts: %d pending video(s)", len(pending))
 
+    # Build the API client *once* so cookies / proxy config are reused
+    # across every fetch in the run (and not reconstructed 119 times).
+    api = build_api()
+
     fetched = missing = errored = 0
     for video_id in pending:
-        status, payload = _fetch_one(video_id)
+        status, payload = _fetch_one(api, video_id)
         _record(video_id, status, payload)
         if status == "ok":
             fetched += 1
@@ -90,6 +145,7 @@ def _select_pending_videos(*, retry_errors: bool) -> list[str]:
 
 
 def _fetch_one(
+    api: YouTubeTranscriptApi,
     video_id: str,
 ) -> tuple[str, dict[str, Any]]:
     """Returns `(status, payload)` ready for DB insert. Status is one of
@@ -97,7 +153,6 @@ def _fetch_one(
     """
     try:
         # Prefer English first, fall back to any available transcript.
-        api = YouTubeTranscriptApi()
         transcript_list = api.list(video_id)
         try:
             transcript = transcript_list.find_transcript(["en", "en-US", "en-GB"])

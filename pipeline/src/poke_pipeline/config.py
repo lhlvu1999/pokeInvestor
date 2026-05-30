@@ -67,6 +67,20 @@ class Settings:
     callers should read `llm_temperature_override` together with this.
     """
 
+    yt_transcript_cookies_path: str | None
+    """Path to a Netscape-format cookies file exported from a browser
+    where you're logged into YouTube. Passed to youtube-transcript-api
+    via a requests.Session. Use to work around IP bans — YouTube treats
+    authenticated requests more leniently. Leave unset for unauthenticated
+    fetches (the default until you hit a block).
+    """
+    yt_transcript_proxy_url: str | None
+    """Generic HTTP/SOCKS proxy URL applied to both http:// and https://
+    transcript fetches (e.g. `http://user:pass@host:port`, `socks5://...`).
+    The other documented workaround for IP bans. Leave unset to fetch
+    directly.
+    """
+
     # Tunables — overridable via env, sensible defaults for local dev.
     discover_max_per_source: int = 50
     """Cap on videos pulled per channel per discovery pass."""
@@ -126,6 +140,8 @@ def load_settings() -> Settings:
         llm_model_override=model_override,
         llm_temperature_override=temp_value,
         llm_temperature_force_null=temp_force_null,
+        yt_transcript_cookies_path=_optional("YT_TRANSCRIPT_COOKIES"),
+        yt_transcript_proxy_url=_optional("YT_TRANSCRIPT_PROXY"),
         discover_max_per_source=int(_optional("PIPE_DISCOVER_MAX", "50") or "50"),
         insights_batch_limit=int(_optional("PIPE_INSIGHTS_BATCH", "25") or "25"),
         request_timeout_sec=float(
