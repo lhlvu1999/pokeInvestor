@@ -86,7 +86,9 @@ export function InsightCard({ insight }: { insight: InsightListEntry }) {
           <div className="text-xs text-zinc-500 mt-0.5">
             {insight.channelTitle ?? "—"}
             {" · "}
-            {insight.publishedAt.toLocaleDateString()}
+            {insight.publishedAt
+              ? insight.publishedAt.toLocaleDateString()
+              : "—"}
             {" · prompt v"}
             {insight.promptVersion}
           </div>

@@ -69,6 +69,7 @@ export function SourcesTable({ sources }: { sources: YoutubeSource[] }) {
             <th className="text-left px-4 py-2.5 font-medium">Title</th>
             <th className="text-left px-4 py-2.5 font-medium">External ID</th>
             <th className="text-left px-4 py-2.5 font-medium">Added</th>
+            <th className="text-left px-4 py-2.5 font-medium">Backfill</th>
             <th className="text-left px-4 py-2.5 font-medium">Last discover</th>
             <th className="text-right px-4 py-2.5 font-medium">Actions</th>
           </tr>
@@ -110,6 +111,21 @@ export function SourcesTable({ sources }: { sources: YoutubeSource[] }) {
               </td>
               <td className="px-4 py-2.5 text-xs text-zinc-500">
                 {formatDate(s.addedAt)}
+              </td>
+              <td className="px-4 py-2.5 text-xs">
+                {s.backfilledAt ? (
+                  <span
+                    className="text-zinc-500"
+                    title={`Up to ${s.backfillMaxVideos} videos fetched on ${formatDate(s.backfilledAt)}`}
+                  >
+                    {formatDate(s.backfilledAt)} ·{" "}
+                    <span className="text-zinc-400">{s.backfillMaxVideos}</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center text-[11px] uppercase tracking-wider rounded px-1.5 py-0.5 bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                    pending · {s.backfillMaxVideos}
+                  </span>
+                )}
               </td>
               <td className="px-4 py-2.5 text-xs text-zinc-500">
                 {formatDate(s.lastDiscoveredAt)}

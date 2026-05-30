@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: poke-pipeline-backfill
+  labels:
+    app: poke-pipeline
+    phase: backfill
+spec:
+  # Every 30 minutes. Per-run cost is bounded by the count of sources with
+  # `backfilled_at IS NULL` — usually 0 (no-op) or 1 (just added a source).
+  schedule: "*/30 * * * *"
+  timezone: "UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  workflowSpec:
+    workflowTemplateRef:
+      name: poke-pipeline
+    arguments:
+      parameters:
+        - name: phase
+          value: backfill

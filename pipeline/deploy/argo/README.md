@@ -9,6 +9,7 @@ Each phase has its own schedule so a slow `insights` run doesn't delay
 | File                                    | What it is                                                |
 | --------------------------------------- | --------------------------------------------------------- |
 | `workflowtemplate.yaml`                 | Parameterized template — image + env + retry policy       |
+| `cronworkflow-backfill.yaml`            | every 30 min — processes newly-added sources              |
 | `cronworkflow-discover.yaml`            | hourly                                                    |
 | `cronworkflow-transcripts.yaml`         | every 15 min                                              |
 | `cronworkflow-insights.yaml`            | every 30 min                                              |
@@ -46,6 +47,7 @@ kubectl create secret generic poke-pipeline \
 
 # Apply the template, then the schedules.
 kubectl apply -f workflowtemplate.yaml
+kubectl apply -f cronworkflow-backfill.yaml
 kubectl apply -f cronworkflow-discover.yaml
 kubectl apply -f cronworkflow-transcripts.yaml
 kubectl apply -f cronworkflow-insights.yaml
@@ -68,6 +70,7 @@ Defaults in `workflowtemplate.yaml`:
 
 | Phase        | Typical runtime         | Why                                  |
 | ------------ | ----------------------- | ------------------------------------ |
+| backfill     | <2s per new source      | One flat HTTP per channel; bounded by `backfill_max_videos`. Skips already-backfilled sources. |
 | discover     | seconds                 | RSS fetch per channel, cheap         |
 | transcripts  | ~1s/video               | Network-bound on YouTube responses   |
 | insights     | seconds–minutes/video   | LLM call dominates; budget for cost  |

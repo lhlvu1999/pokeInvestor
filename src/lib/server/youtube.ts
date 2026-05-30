@@ -23,6 +23,18 @@ export async function listYoutubeSources(): Promise<YoutubeSource[]> {
 const addSchema = z.object({
   input: z.string().trim().min(1, "Paste a channel URL, @handle, or video URL"),
   title: z.string().trim().max(200).optional(),
+  /**
+   * Max videos to pull during one-shot historical backfill. The pipeline
+   * uses yt-dlp's flat channel extraction (no API key, no per-video calls)
+   * which means we trade date filtering for count-based depth. Capped at
+   * 1000 to keep the single HTTP request fast.
+   */
+  backfillMaxVideos: z
+    .number()
+    .int()
+    .min(0)
+    .max(1000)
+    .optional(),
 });
 
 export type AddYoutubeSourceInput = z.input<typeof addSchema>;
@@ -94,6 +106,10 @@ export async function addYoutubeSource(
       externalId,
       handle,
       title: parsed.data.title ?? resolvedTitle,
+      // Only override the schema default when the caller passed something.
+      ...(parsed.data.backfillMaxVideos !== undefined
+        ? { backfillMaxVideos: parsed.data.backfillMaxVideos }
+        : {}),
     })
     .returning();
 

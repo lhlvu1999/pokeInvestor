@@ -18,7 +18,7 @@ spec:
   arguments:
     parameters:
       - name: phase
-        description: "discover | transcripts | insights | all"
+        description: "backfill | discover | transcripts | insights | all"
   templates:
     - name: run
       inputs:

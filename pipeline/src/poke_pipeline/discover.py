@@ -86,7 +86,7 @@ def _discover_channel(source: src_repo.Source, max_per_source: int) -> int:
         published_at = _parse_published(entry)
         if published_at is None:
             continue
-        if _upsert_video(
+        if upsert_video(
             video_id=video_id,
             source_id=source.id,
             title=getattr(entry, "title", "") or "",
@@ -183,7 +183,7 @@ def _discover_single_video(source: src_repo.Source) -> int:
         # Fallback: we'd rather record "now" than skip; the field is required.
         published_at = datetime.now(tz=UTC)
 
-    inserted = _upsert_video(
+    inserted = upsert_video(
         video_id=source.external_id,
         source_id=source.id,
         title=title_match.group(1),
@@ -209,14 +209,14 @@ def _safe_iso(value: str) -> datetime | None:
 # ─── upsert ─────────────────────────────────────────────────────────────────
 
 
-def _upsert_video(
+def upsert_video(
     *,
     video_id: str,
     source_id: str,
     title: str,
     channel_id: str,
     channel_title: str | None,
-    published_at: datetime,
+    published_at: datetime | None,
 ) -> bool:
     """Insert a video if it's new; otherwise refresh title/source attribution.
     Returns True iff the row didn't previously exist.
@@ -228,11 +228,28 @@ def _upsert_video(
               (video_id, source_id, title, channel_id, channel_title, published_at)
             VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT (video_id) DO UPDATE
-              SET title = EXCLUDED.title,
+              SET
+                  -- Title rule: RSS data is authoritative (always current);
+                  -- yt-dlp flat extract sometimes serves stale titles from
+                  -- YouTube's cached channel-listing page. So: only let the
+                  -- incoming title win when *either* the new row also has a
+                  -- date (i.e. this is an RSS-driven upsert, the freshest
+                  -- source) *or* the existing row has no date (i.e. it was
+                  -- only ever touched by backfill, no risk of overwriting
+                  -- RSS data with stale data).
+                  title = CASE
+                    WHEN EXCLUDED.published_at IS NOT NULL THEN EXCLUDED.title
+                    WHEN youtube_videos.published_at IS NULL THEN EXCLUDED.title
+                    ELSE youtube_videos.title
+                  END,
                   channel_title = COALESCE(EXCLUDED.channel_title,
                                            youtube_videos.channel_title),
                   source_id = COALESCE(youtube_videos.source_id,
-                                       EXCLUDED.source_id)
+                                       EXCLUDED.source_id),
+                  -- Don't overwrite a real date with NULL: backfill goes
+                  -- first with no date, then a later RSS discover fills it.
+                  published_at = COALESCE(EXCLUDED.published_at,
+                                          youtube_videos.published_at)
             RETURNING (xmax = 0) AS inserted
             """,
             (video_id, source_id, title, channel_id, channel_title, published_at),

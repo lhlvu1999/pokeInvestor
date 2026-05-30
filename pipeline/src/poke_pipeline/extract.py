@@ -163,7 +163,7 @@ def _select_pending(prompt_id: str, *, limit: int) -> list[tuple[str, str, str]]
             WHERE t.status = 'ok'
               AND t.text IS NOT NULL
               AND i.id IS NULL
-            ORDER BY v.published_at DESC
+            ORDER BY COALESCE(v.published_at, v.discovered_at) DESC
             LIMIT %s
             """,
             (prompt_id, limit),

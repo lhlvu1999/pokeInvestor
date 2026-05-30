@@ -21,10 +21,11 @@ For the full architecture see [`../docs/youtube-pipeline.md`](../docs/youtube-pi
 ## Subcommands
 
 ```bash
-uv run poke-pipeline discover     # RSS-based video discovery
+uv run poke-pipeline backfill     # one-shot deep fetch for newly-added sources
+uv run poke-pipeline discover     # RSS-based video discovery (hourly)
 uv run poke-pipeline transcripts  # youtube-transcript-api fetch
 uv run poke-pipeline insights     # OpenAI structured-output extraction
-uv run poke-pipeline all          # all three in sequence
+uv run poke-pipeline all          # backfill → discover → transcripts → insights
 uv run poke-pipeline -v all       # verbose logging
 ```
 
@@ -127,6 +128,28 @@ youtube_insight_extraction v2 via http://localhost:11434/v1 (json_mode=True)
   for most full transcripts. Set a larger context in the model's `Modelfile`
   or via `OLLAMA_CONTEXT_LENGTH=8192 ollama serve`. Without this, long
   transcripts will be silently truncated.
+
+### Title freshness for backfilled videos
+
+`backfill` uses yt-dlp's flat channel extraction, which returns YouTube's
+*cached* channel-listing data — sometimes a few hours behind the watch page.
+If a creator renames a video after upload, the flat title can be stale.
+
+The pipeline handles this with a strict precedence rule: **RSS always wins
+over backfill for the `title` column**. The upsert in `discover.upsert_video`
+will not overwrite an RSS-set title with a flat-extract one. In practice:
+
+- **Latest ~15 videos per channel** — refreshed hourly by `discover`. Always
+  match YouTube exactly, even through renames.
+- **Older backfilled videos** — title is whatever flat extract returned at
+  backfill time. Almost always correct; very occasionally drifts if the
+  creator renamed an older video. Acceptable trade-off for a count-based
+  backfill that needs no API key and no auth.
+
+If a particular older video's title looks wrong, the quickest fix is to
+re-run backfill on that source (clear `backfilled_at` in the DB, or via the
+forthcoming "Re-backfill" button) — yt-dlp's channel-page cache usually
+catches up within a day.
 
 ### Switching back to OpenAI
 

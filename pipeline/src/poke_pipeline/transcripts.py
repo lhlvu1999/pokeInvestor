@@ -59,7 +59,9 @@ def _select_pending_videos() -> list[str]:
             FROM youtube_videos v
             LEFT JOIN youtube_transcripts t ON t.video_id = v.video_id
             WHERE t.video_id IS NULL
-            ORDER BY v.published_at DESC
+            -- Backfilled videos have published_at NULL until RSS catches
+            -- them; fall back to discovered_at so they don't all sort last.
+            ORDER BY COALESCE(v.published_at, v.discovered_at) DESC
             """
         )
         return [row["video_id"] for row in cur.fetchall()]

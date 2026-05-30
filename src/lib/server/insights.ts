@@ -36,7 +36,9 @@ export type InsightListEntry = {
   videoId: string;
   videoTitle: string;
   channelTitle: string | null;
-  publishedAt: Date;
+  /** NULL for videos discovered via backfill (count-based flat extraction
+   * doesn't expose upload dates). RSS-discovered videos always have a value. */
+  publishedAt: Date | null;
   createdAt: Date;
   promptVersion: number;
   payload: unknown;

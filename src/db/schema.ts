@@ -252,6 +252,26 @@ export const youtubeSources = pgTable(
       .defaultNow()
       .notNull(),
     lastDiscoveredAt: timestamp("last_discovered_at", { withTimezone: true }),
+    /**
+     * Max videos to fetch when the source is first added. The pipeline uses
+     * yt-dlp's *flat* channel-listing extraction (no per-video request, no
+     * API key, sidesteps YouTube's anti-bot wall) to grab this many recent
+     * videos in newest-first order. After backfill completes, ongoing
+     * discovery falls back to the cheap RSS feed (~15 most recent only).
+     *
+     * Date-range backfill (e.g. "last 180 days") is not viable without auth
+     * — YouTube's bot wall blocks the per-video metadata calls needed to
+     * read upload dates. We trade exact date filtering for a reliable
+     * count-based depth instead.
+     */
+    backfillMaxVideos: integer("backfill_max_videos").notNull().default(100),
+    /**
+     * Set the first time backfill finishes successfully. NULL means "not
+     * yet backfilled" — picked up by the `backfill` phase. Re-running
+     * (e.g. after raising `backfill_max_videos`) is a manual action that
+     * clears this column back to NULL.
+     */
+    backfilledAt: timestamp("backfilled_at", { withTimezone: true }),
   },
   (t) => [
     uniqueIndex("youtube_sources_kind_external_uq").on(t.kind, t.externalId),
@@ -274,7 +294,14 @@ export const youtubeVideos = pgTable(
     title: text("title").notNull(),
     channelId: text("channel_id").notNull(),
     channelTitle: text("channel_title"),
-    publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
+    /**
+     * Upload timestamp from RSS. Nullable because count-based backfill via
+     * yt-dlp's flat channel listing cannot read individual videos' upload
+     * dates (YouTube's anti-bot wall blocks the per-video requests needed).
+     * Backfilled rows have `published_at = NULL`; RSS-discovered rows have
+     * accurate dates. Sort with `COALESCE(published_at, discovered_at)`.
+     */
+    publishedAt: timestamp("published_at", { withTimezone: true }),
     durationSec: integer("duration_sec"),
     discoveredAt: timestamp("discovered_at", { withTimezone: true })
       .defaultNow()

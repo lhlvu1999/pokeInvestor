@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Sibling Python project — `.venv/` ships vendored JS from yt-dlp etc.
+    // that should never be linted.
+    "pipeline/**",
   ]),
 ]);
 
