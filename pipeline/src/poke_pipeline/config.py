@@ -66,6 +66,13 @@ class Settings:
     "user wants null" from "user didn't set an override". Internal flag —
     callers should read `llm_temperature_override` together with this.
     """
+    llm_timeout_sec: float
+    """Per-request timeout for LLM calls (`OpenAI()` client). Default is
+    1800s (30 min) — long enough for `qwen2.5:14b` on local CPU to chew
+    through a multi-thousand-token transcript, where the OpenAI SDK's
+    default 600s timeout reliably trips. For api.openai.com you can drop
+    this back to 300s; for slower local models you may need 3600.
+    """
 
     transcript_method: str
     """Which engine fetches transcripts.
@@ -163,6 +170,7 @@ def load_settings() -> Settings:
         llm_model_override=model_override,
         llm_temperature_override=temp_value,
         llm_temperature_force_null=temp_force_null,
+        llm_timeout_sec=float(_optional("LLM_TIMEOUT_SEC", "1800") or "1800"),
         transcript_method=(_optional("TRANSCRIPT_METHOD") or "youtube_captions"),
         whisper_model_size=(_optional("WHISPER_MODEL_SIZE") or "small"),
         whisper_device=(_optional("WHISPER_DEVICE") or "auto"),
