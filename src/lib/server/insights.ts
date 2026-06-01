@@ -45,14 +45,69 @@ export type InsightListEntry = {
   mentions: InsightListMention[];
 };
 
+export type InsightListFilter = {
+  /** Time window in days (`0` = all time). Applied to the video's
+   * published_at, falling back to discovered_at for backfilled rows. */
+  days?: number;
+  /** Restrict to insights from these channel IDs (empty = all channels). */
+  channelIds?: string[];
+  /**
+   * Restrict to insights mentioning a string. Matches against
+   * `youtube_insight_mentions.raw_name` and `items.name`, case-insensitive.
+   * Use null/empty to skip.
+   */
+  q?: string;
+  /** Restrict to insights whose overall sentiment is in this set. */
+  overallSentiments?: string[];
+};
+
 /**
  * Recent insights, newest extraction first, with their mentions inlined.
  * Implemented as two queries + an in-memory join — there's only ~25–50
  * insights on a page so this is cheaper than a single mega-query and
  * easier to read.
  */
-export async function listInsights(limit = 50): Promise<InsightListEntry[]> {
-  const rows = await db
+export async function listInsights(
+  filter: InsightListFilter = {},
+  limit = 50,
+): Promise<InsightListEntry[]> {
+  // Build the WHERE clause incrementally so the un-filtered call stays the
+  // simple SELECT it was before.
+  const conds = [] as ReturnType<typeof sql>[];
+  const days = Math.max(0, Math.min(filter.days ?? 0, 3650));
+  if (days > 0) {
+    conds.push(sql`COALESCE(${youtubeVideos.publishedAt}, ${youtubeVideos.discoveredAt}) > NOW() - (${days} || ' days')::interval`);
+  }
+  if (filter.channelIds && filter.channelIds.length > 0) {
+    conds.push(inArray(youtubeVideos.channelId, filter.channelIds));
+  }
+  const q = filter.q?.trim();
+  if (q && q.length > 0) {
+    // EXISTS clause across both raw_name and matched item name.
+    conds.push(sql`EXISTS (
+      SELECT 1
+      FROM ${youtubeInsightMentions} mm
+      LEFT JOIN ${items} ii ON ii.id = mm.item_id
+      WHERE mm.insight_id = ${youtubeInsights.id}
+        AND (mm.raw_name ILIKE ${`%${q}%`} OR ii.name ILIKE ${`%${q}%`})
+    )`);
+  }
+  if (filter.overallSentiments && filter.overallSentiments.length > 0) {
+    // overall_sentiment lives in the jsonb payload. Build an explicit
+    // ARRAY[…]::text[] literal so Drizzle binds one parameter per value
+    // — the older `= ANY(${arr}::text[])` form produces a record literal
+    // and Postgres can't cast that.
+    const valuesSql = sql.join(
+      filter.overallSentiments.map((s) => sql`${s}`),
+      sql`, `,
+    );
+    conds.push(
+      sql`${youtubeInsights.payload}->>'overall_sentiment' IN (${valuesSql})`,
+    );
+  }
+  const where = conds.length > 0 ? sql.join(conds, sql` AND `) : undefined;
+
+  const baseQuery = db
     .select({
       id: youtubeInsights.id,
       videoId: youtubeInsights.videoId,
@@ -65,7 +120,8 @@ export async function listInsights(limit = 50): Promise<InsightListEntry[]> {
     })
     .from(youtubeInsights)
     .innerJoin(youtubeVideos, eq(youtubeVideos.videoId, youtubeInsights.videoId))
-    .innerJoin(prompts, eq(prompts.id, youtubeInsights.promptId))
+    .innerJoin(prompts, eq(prompts.id, youtubeInsights.promptId));
+  const rows = await (where ? baseQuery.where(where) : baseQuery)
     .orderBy(desc(youtubeInsights.createdAt))
     .limit(limit);
 

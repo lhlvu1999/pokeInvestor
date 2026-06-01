@@ -80,7 +80,7 @@ def run() -> ExtractResult:
 
     log.info(
         "insights: %d transcript(s) for prompt %s v%d · model=%s [%s] "
-        "temp=%s [%s] · backend=%s json_mode=%s",
+        "temp=%s [%s] · backend=%s json_mode=%s · timeout=%.0fs",
         len(pending),
         prompt.name,
         prompt.version,
@@ -90,11 +90,13 @@ def run() -> ExtractResult:
         temp_src,
         settings.openai_base_url or "api.openai.com",
         settings.llm_json_mode,
+        settings.llm_timeout_sec,
     )
 
     client = OpenAI(
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
+        timeout=settings.llm_timeout_sec,
     )
     items_index = load_items_index()
 

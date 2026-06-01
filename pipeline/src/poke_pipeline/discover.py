@@ -20,6 +20,7 @@ from typing import Any
 
 import feedparser
 import httpx
+from yt_dlp import YoutubeDL  # type: ignore[import-untyped]
 
 from poke_pipeline import sources as src_repo
 from poke_pipeline.config import load_settings
@@ -78,6 +79,13 @@ def _discover_channel(source: src_repo.Source, max_per_source: int) -> int:
     entries = feed.entries[:max_per_source]
     log.debug("channel %s: %d RSS entries", source.external_id, len(entries))
 
+    # RSS gives us titles + publish dates but no durations. yt-dlp flat
+    # extract gives durations but no dates. Combine them: one extra HTTP per
+    # channel per discover run, falling back to NULL durations if yt-dlp fails.
+    duration_by_id = _fetch_durations_for_channel(
+        source.external_id, cap=max_per_source
+    )
+
     added = 0
     for entry in entries:
         video_id = _extract_video_id(entry)
@@ -93,9 +101,86 @@ def _discover_channel(source: src_repo.Source, max_per_source: int) -> int:
             channel_id=source.external_id,
             channel_title=channel_title,
             published_at=published_at,
+            duration_sec=duration_by_id.get(video_id),
         ):
             added += 1
+
+    # Self-heal: any row from this channel still missing duration_sec gets
+    # filled in if the flat extract knows about it. Catches videos that
+    # were inserted before duration capture existed (or that are older
+    # than RSS's 15-window so they don't otherwise hit upsert).
+    _fill_missing_durations(source.external_id, duration_by_id)
     return added
+
+
+def _fill_missing_durations(
+    channel_id: str, duration_by_id: dict[str, int]
+) -> None:
+    """UPDATE every NULL-duration video in this channel whose video_id we
+    just looked up in the flat extract. Cheap (single statement) and runs
+    once per discover pass.
+    """
+    if not duration_by_id:
+        return
+    video_ids = list(duration_by_id.keys())
+    # Build a VALUES list so Postgres can join the (id, duration) pairs
+    # against the table in one shot.
+    pairs_sql = ",".join(["(%s, %s)"] * len(duration_by_id))
+    params: list[object] = []
+    for vid in video_ids:
+        params.extend([vid, duration_by_id[vid]])
+    with connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"""
+            UPDATE youtube_videos AS yv
+            SET duration_sec = p.duration_sec
+            FROM (VALUES {pairs_sql}) AS p(video_id, duration_sec)
+            WHERE yv.video_id = p.video_id
+              AND yv.channel_id = %s
+              AND yv.duration_sec IS NULL
+            """,
+            [*params, channel_id],
+        )
+
+
+def _fetch_durations_for_channel(channel_id: str, *, cap: int) -> dict[str, int]:
+    """One yt-dlp flat extract → `{video_id: duration_sec}` for enriching
+    RSS-discovered videos. RSS doesn't carry durations; yt-dlp's flat
+    channel listing does. Failure here is non-fatal — discover keeps working
+    with `duration_sec = NULL` and the next backfill pass will fill it in.
+    """
+    url = f"https://www.youtube.com/channel/{channel_id}/videos"
+    opts: dict[str, Any] = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "ignoreerrors": True,
+        "extract_flat": "in_playlist",
+        "playlistend": cap,
+    }
+    try:
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception:
+        log.debug("duration enrichment failed for %s", channel_id, exc_info=True)
+        return {}
+    if not isinstance(info, dict):
+        return {}
+    out: dict[str, int] = {}
+    for entry in info.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        vid = entry.get("id")
+        dur = entry.get("duration")
+        if not isinstance(vid, str) or dur is None:
+            continue
+        try:
+            seconds = int(float(dur))
+        except (TypeError, ValueError):
+            continue
+        if seconds > 0:
+            out[vid] = seconds
+    return out
 
 
 def _extract_video_id(entry: Any) -> str | None:
@@ -217,6 +302,7 @@ def upsert_video(
     channel_id: str,
     channel_title: str | None,
     published_at: datetime | None,
+    duration_sec: int | None = None,
 ) -> bool:
     """Insert a video if it's new; otherwise refresh title/source attribution.
     Returns True iff the row didn't previously exist.
@@ -225,8 +311,9 @@ def upsert_video(
         cur.execute(
             """
             INSERT INTO youtube_videos
-              (video_id, source_id, title, channel_id, channel_title, published_at)
-            VALUES (%s, %s, %s, %s, %s, %s)
+              (video_id, source_id, title, channel_id, channel_title,
+               published_at, duration_sec)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (video_id) DO UPDATE
               SET
                   -- Title rule: RSS data is authoritative (always current);
@@ -249,10 +336,16 @@ def upsert_video(
                   -- Don't overwrite a real date with NULL: backfill goes
                   -- first with no date, then a later RSS discover fills it.
                   published_at = COALESCE(EXCLUDED.published_at,
-                                          youtube_videos.published_at)
+                                          youtube_videos.published_at),
+                  -- Same COALESCE story for duration: backfill (flat extract)
+                  -- has it, RSS doesn't — never let a NULL overwrite a real
+                  -- value.
+                  duration_sec = COALESCE(EXCLUDED.duration_sec,
+                                          youtube_videos.duration_sec)
             RETURNING (xmax = 0) AS inserted
             """,
-            (video_id, source_id, title, channel_id, channel_title, published_at),
+            (video_id, source_id, title, channel_id, channel_title,
+             published_at, duration_sec),
         )
         row = cur.fetchone()
         return bool(row and row["inserted"])

@@ -71,10 +71,65 @@ def cmd_discover() -> None:
 
 
 @app.command("transcripts")
-def cmd_transcripts() -> None:
+def cmd_transcripts(
+    retry_errors: bool = typer.Option(
+        False,
+        "--retry-errors",
+        help=(
+            "Also re-fetch videos previously recorded with status='error' "
+            "(e.g. rate-limit / IP-block failures). Wait for the block to "
+            "expire before using — usually hours. Rows with status='missing' "
+            "are NEVER retried — YouTube has confirmed captions are disabled."
+        ),
+    ),
+    test: str | None = typer.Option(
+        None,
+        "--test",
+        metavar="VIDEO_ID",
+        help=(
+            "Diagnostic: try fetching a single video's transcript with the "
+            "current cookies/proxy config and print the result. Doesn't "
+            "touch the DB. Use to verify an IP-block has lifted (or that "
+            "your cookies / proxy work) before running the full batch."
+        ),
+    ),
+    method: str | None = typer.Option(
+        None,
+        "--method",
+        metavar="ENGINE",
+        help=(
+            "Override TRANSCRIPT_METHOD for this run: 'youtube_captions' "
+            "(scrape, IP-block prone) or 'whisper' (local audio + faster-"
+            "whisper). Use with --test to compare engines on the same video."
+        ),
+    ),
+) -> None:
     """Fetch transcripts for any videos that don't have one yet."""
+    from poke_pipeline import whisper_transcribe
+    from poke_pipeline.config import load_settings
+
     try:
-        result = transcripts.run()
+        if test is not None:
+            settings = load_settings()
+            engine = (method or settings.transcript_method).lower()
+            if engine == "whisper":
+                status, payload = whisper_transcribe.transcribe(test, settings)
+            else:
+                api = transcripts.build_api()
+                status, payload = transcripts._fetch_one(api, test)
+            typer.echo(f"video_id: {test}")
+            typer.echo(f"method:   {engine}")
+            typer.echo(f"status:   {status}")
+            if status == "ok":
+                length = len(payload.get("text") or "")
+                lang = payload.get("language")
+                typer.echo(f"language: {lang}")
+                typer.echo(f"length:   {length} chars")
+            else:
+                err = payload.get("error_msg") or ""
+                typer.echo(f"error:    {err[:200]}")
+            return
+        result = transcripts.run(retry_errors=retry_errors, method_override=method)
         typer.echo(
             f"transcripts: {result.fetched} fetched, "
             f"{result.missing} missing, {result.errored} errored"

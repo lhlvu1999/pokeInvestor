@@ -66,6 +66,50 @@ class Settings:
     "user wants null" from "user didn't set an override". Internal flag —
     callers should read `llm_temperature_override` together with this.
     """
+    llm_timeout_sec: float
+    """Per-request timeout for LLM calls (`OpenAI()` client). Default is
+    1800s (30 min) — long enough for `qwen2.5:14b` on local CPU to chew
+    through a multi-thousand-token transcript, where the OpenAI SDK's
+    default 600s timeout reliably trips. For api.openai.com you can drop
+    this back to 300s; for slower local models you may need 3600.
+    """
+
+    transcript_method: str
+    """Which engine fetches transcripts.
+      - `youtube_captions` (default): scrape YouTube's timedtext endpoint
+        via youtube-transcript-api. Fast, free, IP-block prone.
+      - `whisper`: download audio via yt-dlp + transcribe with local
+        faster-whisper. Slower, no API key, no IP-block on the caption
+        endpoint (audio download path may still be rate-limited).
+    """
+    whisper_model_size: str
+    """faster-whisper model name: tiny | base | small | medium | large-v3.
+    Bigger = more accurate + slower + larger download.
+    Apple Silicon defaults: `small` is the sweet spot.
+    """
+    whisper_device: str
+    """`auto` | `cpu` | `cuda`. `auto` lets faster-whisper pick the best
+    available — typically GPU on a CUDA box, CPU elsewhere. (Metal / MPS
+    is not currently supported by CTranslate2; macOS runs on CPU.)
+    """
+    whisper_compute_type: str
+    """CTranslate2 compute type. `int8` is the right default on CPU
+    (smallest memory, fastest). `float16` for GPU. `auto` lets the
+    library decide.
+    """
+    yt_transcript_cookies_path: str | None
+    """Path to a Netscape-format cookies file exported from a browser
+    where you're logged into YouTube. Passed to youtube-transcript-api
+    via a requests.Session. Use to work around IP bans — YouTube treats
+    authenticated requests more leniently. Leave unset for unauthenticated
+    fetches (the default until you hit a block).
+    """
+    yt_transcript_proxy_url: str | None
+    """Generic HTTP/SOCKS proxy URL applied to both http:// and https://
+    transcript fetches (e.g. `http://user:pass@host:port`, `socks5://...`).
+    The other documented workaround for IP bans. Leave unset to fetch
+    directly.
+    """
 
     # Tunables — overridable via env, sensible defaults for local dev.
     discover_max_per_source: int = 50
@@ -126,6 +170,13 @@ def load_settings() -> Settings:
         llm_model_override=model_override,
         llm_temperature_override=temp_value,
         llm_temperature_force_null=temp_force_null,
+        llm_timeout_sec=float(_optional("LLM_TIMEOUT_SEC", "1800") or "1800"),
+        transcript_method=(_optional("TRANSCRIPT_METHOD") or "youtube_captions"),
+        whisper_model_size=(_optional("WHISPER_MODEL_SIZE") or "small"),
+        whisper_device=(_optional("WHISPER_DEVICE") or "auto"),
+        whisper_compute_type=(_optional("WHISPER_COMPUTE_TYPE") or "int8"),
+        yt_transcript_cookies_path=_optional("YT_TRANSCRIPT_COOKIES"),
+        yt_transcript_proxy_url=_optional("YT_TRANSCRIPT_PROXY"),
         discover_max_per_source=int(_optional("PIPE_DISCOVER_MAX", "50") or "50"),
         insights_batch_limit=int(_optional("PIPE_INSIGHTS_BATCH", "25") or "25"),
         request_timeout_sec=float(
