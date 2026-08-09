@@ -126,8 +126,30 @@ youtube_insight_extraction v2 via http://localhost:11434/v1 (json_mode=True)
   next run retries unaffected videos.
 - **Transcript length.** Default Ollama context is 2048 tokens — too small
   for most full transcripts. Set a larger context in the model's `Modelfile`
-  or via `OLLAMA_CONTEXT_LENGTH=8192 ollama serve`. Without this, long
-  transcripts will be silently truncated.
+  or via `OLLAMA_CONTEXT_LENGTH=32768 ollama serve` (qwen2.5's native
+  context). Without enough context, Ollama's runner keeps only the first
+  **4 tokens** of your prompt and truncates the rest — which drops the
+  system instructions and produces broken or hanging structured outputs.
+
+  The pipeline now defends against this on its own side: before each LLM
+  call it estimates the token count and **head + tail clips** any
+  transcript that wouldn't fit (head fraction set by
+  `LLM_TRANSCRIPT_HEAD_RATIO`, default 0.6 — Pokémon investment videos
+  usually front-load product picks and end with summaries, so the middle
+  is the cheapest part to drop). The relevant knobs:
+
+  ```
+  LLM_CONTEXT_TOKENS=32768         # set to your actual Ollama / API ceiling
+  LLM_MAX_OUTPUT_TOKENS=1024       # reserved headroom for the JSON response
+  LLM_TRANSCRIPT_HEAD_RATIO=0.6    # head/tail split when clipping
+  LLM_MIN_TRANSCRIPT_TOKENS=500    # skip videos when the budget is below this
+  ```
+
+  Clipped runs log a `clipping <video>: N → M tokens` line so the
+  operator can see when it's happening. If the budget falls below
+  `LLM_MIN_TRANSCRIPT_TOKENS` (e.g. someone shipped a huge system
+  prompt that ate the whole context), the video is marked errored and
+  skipped instead of being sent with near-empty input.
 
 ### Title freshness for backfilled videos
 

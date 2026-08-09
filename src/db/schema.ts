@@ -54,11 +54,24 @@ export const items = pgTable(
       .array()
       .notNull()
       .default(sql`ARRAY[]::text[]`),
+    /**
+     * Alternate names creators use for this product, stored lowercased.
+     * The pipeline's matcher checks each `raw_name` against `name` first,
+     * then `aliases @> ARRAY[lower(raw_name)]`. Lets the user resolve a
+     * raw name once and have it auto-link on every future mention.
+     */
+    aliases: text("aliases")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
   },
-  (t) => [index("items_tags_idx").using("gin", t.tags)],
+  (t) => [
+    index("items_tags_idx").using("gin", t.tags),
+    index("items_aliases_idx").using("gin", t.aliases),
+  ],
 );
 
 /**

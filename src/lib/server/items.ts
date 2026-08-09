@@ -98,6 +98,88 @@ export async function setItemTags(
   return { ok: true, data: normalized };
 }
 
+/** Normalize one alias string: trim, lowercase, collapse whitespace. */
+function normalizeAlias(raw: string): string {
+  return raw.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Replace an item's aliases. Aliases are normalized: trimmed, lowercased,
+ * whitespace-collapsed, deduplicated, max 120 chars per alias, max 30 per
+ * item. Aliases that coincide with the item's name are silently dropped
+ * (no point storing what the matcher already checks against).
+ */
+export async function setItemAliases(
+  id: string,
+  rawAliases: string[],
+): Promise<ActionResult<string[]>> {
+  if (!Array.isArray(rawAliases)) {
+    return { ok: false, error: "Invalid aliases" };
+  }
+  // Need the item's canonical name to skip self-aliases.
+  const [item] = await db
+    .select({ name: items.name })
+    .from(items)
+    .where(eq(items.id, id))
+    .limit(1);
+  if (!item) return { ok: false, error: "Item not found" };
+  const canonical = normalizeAlias(item.name);
+
+  const normalized = Array.from(
+    new Set(
+      rawAliases
+        .map(normalizeAlias)
+        .filter(
+          (s) => s.length > 0 && s.length <= 120 && s !== canonical,
+        ),
+    ),
+  ).slice(0, 30);
+
+  await db.update(items).set({ aliases: normalized }).where(eq(items.id, id));
+  revalidatePath("/items");
+  revalidatePath("/");
+  revalidatePath(`/items/${id}`);
+  revalidatePath("/admin/mentions");
+  revalidatePath("/insights");
+  return { ok: true, data: normalized };
+}
+
+/**
+ * Append one alias to an item (idempotent — duplicates are dropped).
+ * Used by /admin/mentions when the user opts to "remember this raw name as
+ * an alias" while linking an unmatched mention. Returns the resulting
+ * alias list.
+ */
+export async function addItemAlias(
+  id: string,
+  rawAlias: string,
+): Promise<ActionResult<string[]>> {
+  const alias = normalizeAlias(rawAlias);
+  if (alias.length === 0) return { ok: false, error: "Empty alias" };
+  if (alias.length > 120) return { ok: false, error: "Alias too long" };
+
+  const [item] = await db
+    .select({ name: items.name, aliases: items.aliases })
+    .from(items)
+    .where(eq(items.id, id))
+    .limit(1);
+  if (!item) return { ok: false, error: "Item not found" };
+  if (alias === normalizeAlias(item.name)) {
+    // The matcher already covers the canonical name — no-op.
+    return { ok: true, data: item.aliases };
+  }
+  if (item.aliases.includes(alias)) return { ok: true, data: item.aliases };
+  if (item.aliases.length >= 30) {
+    return { ok: false, error: "Alias limit reached (30)" };
+  }
+  const next = [...item.aliases, alias];
+  await db.update(items).set({ aliases: next }).where(eq(items.id, id));
+  revalidatePath(`/items/${id}`);
+  revalidatePath("/admin/mentions");
+  revalidatePath("/insights");
+  return { ok: true, data: next };
+}
+
 /**
  * Returns every distinct tag in the system, sorted alphabetically.
  * Cheap enough for an MVP at the user's scale.
