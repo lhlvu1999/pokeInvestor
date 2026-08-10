@@ -134,9 +134,16 @@ export async function getTopSignals(filter: SignalFilter): Promise<Signal[]> {
     last_mentioned_at: Date | null;
   }>(sql`
     SELECT
-      m.item_id::text AS item_id,
-      m.raw_name,
-      COALESCE(it.name, m.raw_name) AS display_name,
+      -- Wrapping in MAX() satisfies Postgres's group-by rule when the
+      -- physical GROUP BY key is a COALESCE expression. All rows in a
+      -- group share the same item_id (matched: identical UUID; unmatched:
+      -- all NULL), so MAX returns that shared value.
+      MAX(m.item_id::text) AS item_id,
+      -- For matched items the "raw name" is meaningless (mentions may have
+      -- come in under multiple aliases). Pick any one so the row shape is
+      -- stable; the display uses the item's canonical name instead.
+      MIN(m.raw_name) AS raw_name,
+      COALESCE(MIN(it.name), MIN(m.raw_name)) AS display_name,
       SUM(CASE WHEN m.sentiment = 'bullish' THEN 1 ELSE 0 END)::int AS bullish_count,
       SUM(CASE WHEN m.sentiment = 'bearish' THEN 1 ELSE 0 END)::int AS bearish_count,
       SUM(CASE WHEN m.sentiment IN ('neutral', 'mixed') THEN 1 ELSE 0 END)::int AS neutral_count,
@@ -152,7 +159,10 @@ export async function getTopSignals(filter: SignalFilter): Promise<Signal[]> {
     WHERE 1 = 1
       ${dateClause}
       ${channelClause}
-    GROUP BY m.item_id, m.raw_name, it.name
+    -- Collapse all alias variants into one row per matched item.
+    -- Unmatched mentions (item_id NULL) still group by raw_name so
+    -- distinct unknown products stay distinct.
+    GROUP BY COALESCE(m.item_id::text, 'raw:' || m.raw_name)
     HAVING COUNT(*) >= ${minMentions}
     ORDER BY COUNT(*) DESC, COUNT(DISTINCT v.channel_id) DESC
     LIMIT 30
@@ -181,9 +191,7 @@ export async function getTopSignals(filter: SignalFilter): Promise<Signal[]> {
   return aggregates.map((a) => toSignal(a, holdings));
 }
 
-async function loadHoldings(
-  itemIds: string[],
-): Promise<Map<string, number>> {
+async function loadHoldings(itemIds: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (itemIds.length === 0) return out;
   const txs = await db
@@ -226,15 +234,12 @@ async function loadHoldings(
   return out;
 }
 
-function toSignal(
-  a: AggregateRow,
-  holdings: Map<string, number>,
-): Signal {
+function toSignal(a: AggregateRow, holdings: Map<string, number>): Signal {
   const total = a.mentionCount;
   const netSentiment =
     total > 0 ? (a.bullishCount - a.bearishCount) / total : 0;
   const label = computeLabel(netSentiment, a.sourceCount);
-  const heldQty = a.itemId ? holdings.get(a.itemId) ?? 0 : null;
+  const heldQty = a.itemId ? (holdings.get(a.itemId) ?? 0) : null;
   return {
     key: a.itemId ?? `raw:${a.rawName}`,
     itemId: a.itemId,
@@ -328,4 +333,3 @@ export async function listChannelOptions(): Promise<ChannelOption[]> {
     insightCount: r.insight_count,
   }));
 }
-
