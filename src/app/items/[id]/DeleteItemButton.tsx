@@ -2,7 +2,8 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { deleteItem } from "@/lib/server/items";
+import { deleteItem, restoreItem } from "@/lib/server/items";
+import { useToast } from "@/components/Toast";
 
 export function DeleteItemButton({
   id,
@@ -14,22 +15,44 @@ export function DeleteItemButton({
   txCount: number;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, startTransition] = useTransition();
 
   function handleClick() {
     const msg =
       txCount > 0
-        ? `Delete "${name}" and its ${txCount} transaction(s) and price history? This cannot be undone.`
-        : `Delete "${name}"? This cannot be undone.`;
+        ? `Delete "${name}" and its ${txCount} transaction(s) and price history? Undo will only restore the item itself — its transactions are gone permanently.`
+        : `Delete "${name}"?`;
     if (!confirm(msg)) return;
     startTransition(async () => {
       const res = await deleteItem(id);
       if (!res.ok) {
-        alert(res.error);
+        toast.show({ kind: "error", message: res.error });
         return;
       }
+      const deleted = res.data;
       router.push("/items");
       router.refresh();
+      toast.show({
+        kind: "info",
+        message: `Deleted "${deleted.name}"`,
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            const undo = await restoreItem(deleted);
+            if (!undo.ok) {
+              toast.show({ kind: "error", message: undo.error });
+              return;
+            }
+            router.push(`/items/${deleted.id}`);
+            router.refresh();
+            toast.show({
+              kind: "success",
+              message: `Restored "${deleted.name}"`,
+            });
+          },
+        },
+      });
     });
   }
 

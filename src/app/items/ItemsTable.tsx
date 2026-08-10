@@ -4,12 +4,14 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Card, Select, TextInput } from "@/components/ui";
+import { ItemThumb } from "@/components/ItemThumb";
 import { Money } from "@/components/Money";
 import { TagBadge } from "@/components/TagBadge";
 import type { ItemWithValuation } from "@/lib/server/items";
 import type { ConvertedItemValues } from "@/lib/calc/portfolio";
 
 type SortKey =
+  | "recent"
   | "name"
   | "status"
   | "held"
@@ -31,6 +33,7 @@ type Row = {
 };
 
 const NUMERIC_KEYS: SortKey[] = [
+  "recent",
   "held",
   "pending",
   "sold",
@@ -59,17 +62,9 @@ function statusesOf(v: ItemVal): Status[] {
   const out: Status[] = [];
   if (v.quantity > 0) out.push("in-stock");
   if (v.pendingQuantity > 0) out.push("on-the-way");
-  if (
-    v.quantity === 0 &&
-    v.pendingQuantity === 0 &&
-    v.soldQuantity > 0
-  )
+  if (v.quantity === 0 && v.pendingQuantity === 0 && v.soldQuantity > 0)
     out.push("sold-out");
-  if (
-    v.quantity === 0 &&
-    v.pendingQuantity === 0 &&
-    v.soldQuantity === 0
-  )
+  if (v.quantity === 0 && v.pendingQuantity === 0 && v.soldQuantity === 0)
     out.push("empty");
   return out;
 }
@@ -101,9 +96,16 @@ function parseStatusFilter(raw: string | null): StatusFilter {
   }
 }
 
-function valueFor(row: Row, key: SortKey, displayCurrency: string): number | string {
+function valueFor(
+  row: Row,
+  key: SortKey,
+  displayCurrency: string,
+): number | string {
   const { withVal, conv } = row;
   switch (key) {
+    case "recent":
+      // Items with no transactions sort to the bottom by default (Number.MIN_SAFE_INTEGER).
+      return withVal.lastTxAt?.getTime() ?? Number.MIN_SAFE_INTEGER;
     case "name":
       return withVal.item.name.toLowerCase();
     case "status":
@@ -138,7 +140,13 @@ function valueFor(row: Row, key: SortKey, displayCurrency: string): number | str
   return 0;
 }
 
-function compare(a: Row, b: Row, key: SortKey, dir: SortDir, displayCurrency: string): number {
+function compare(
+  a: Row,
+  b: Row,
+  key: SortKey,
+  dir: SortDir,
+  displayCurrency: string,
+): number {
   const av = valueFor(a, key, displayCurrency);
   const bv = valueFor(b, key, displayCurrency);
   let cmp: number;
@@ -168,9 +176,16 @@ export function ItemsTable({
 
   const initialSort = searchParams.get("sort") as SortKey | null;
   const initialDir = searchParams.get("dir") as SortDir | null;
-  const [sortKey, setSortKey] = useState<SortKey>(initialSort ?? "name");
+  // Default: most-recently-touched first. With 150+ items alphabetical
+  // wastes the fold; users almost always want to see what they just
+  // touched. Explicit `?sort=name` still works.
+  const [sortKey, setSortKey] = useState<SortKey>(initialSort ?? "recent");
   const [sortDir, setSortDir] = useState<SortDir>(
-    initialDir === "asc" || initialDir === "desc" ? initialDir : "asc",
+    initialDir === "asc" || initialDir === "desc"
+      ? initialDir
+      : initialSort
+        ? "asc"
+        : "desc",
   );
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() =>
@@ -194,8 +209,10 @@ export function ItemsTable({
       if (trimmed) params.set("q", trimmed);
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (activeTags.length > 0) params.set("tags", activeTags.join(","));
-      if (sortKey !== "name") params.set("sort", sortKey);
-      if (sortDir !== "asc") params.set("dir", sortDir);
+      // "recent desc" is the default state — no URL params needed.
+      if (sortKey !== "recent") params.set("sort", sortKey);
+      const defaultDir: SortDir = sortKey === "recent" ? "desc" : "asc";
+      if (sortDir !== defaultDir) params.set("dir", sortDir);
       const next = params.toString();
       // Skip the replace when the URL already matches — prevents an extra
       // navigation on mount and on echo from our own replace.
@@ -288,9 +305,7 @@ export function ItemsTable({
         />
         <Select
           value={statusFilter}
-          onChange={(e) =>
-            setStatusFilter(e.target.value as StatusFilter)
-          }
+          onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
           aria-label="Status filter"
         >
           <option value="all">All statuses</option>
@@ -336,224 +351,264 @@ export function ItemsTable({
           )}
         </div>
       )}
+      <div className="text-[11px] text-zinc-500">
+        Sorted by{" "}
+        <span className="font-medium text-zinc-700 dark:text-zinc-300">
+          {sortKey === "recent"
+            ? "most recently updated"
+            : `${sortKey} (${sortDir})`}
+        </span>
+        {sortKey !== "recent" && (
+          <button
+            type="button"
+            onClick={() => {
+              setSortKey("recent");
+              setSortDir("desc");
+            }}
+            className="ml-2 text-zinc-500 hover:underline"
+          >
+            reset
+          </button>
+        )}
+      </div>
       <Card className="overflow-x-auto">
         <table className="w-full text-sm">
-        <thead className="border-b border-zinc-200 dark:border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
-          <tr>
-            <SortHeader
-              col="name"
-              label="Item"
-              align="left"
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onClick={onHeaderClick}
-            />
-            <th className="px-4 py-2 font-medium text-left">Tags</th>
-            <SortHeader
-              col="status"
-              label="Status"
-              align="left"
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onClick={onHeaderClick}
-            />
-            <SortHeader
-              col="held"
-              label="Held"
-              align="right"
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onClick={onHeaderClick}
-            />
-            <SortHeader
-              col="pending"
-              label="Pending"
-              align="right"
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onClick={onHeaderClick}
-            />
-            <SortHeader
-              col="sold"
-              label="Sold"
-              align="right"
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onClick={onHeaderClick}
-            />
-            <SortHeader
-              col="avgCost"
-              label="Avg cost"
-              align="right"
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onClick={onHeaderClick}
-            />
-            <SortHeader
-              col="stockValue"
-              label={`Stock value (${displayCurrency})`}
-              align="right"
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onClick={onHeaderClick}
-            />
-            <SortHeader
-              col="market"
-              label="Market"
-              align="right"
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onClick={onHeaderClick}
-            />
-            <SortHeader
-              col="totalSpent"
-              label={`Total spent (${displayCurrency})`}
-              align="right"
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onClick={onHeaderClick}
-            />
-            <SortHeader
-              col="realized"
-              label={`Realized (${displayCurrency})`}
-              align="right"
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onClick={onHeaderClick}
-            />
-            <SortHeader
-              col="unrealized"
-              label={`Unrealized (${displayCurrency})`}
-              align="right"
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onClick={onHeaderClick}
-            />
-            <SortHeader
-              col="total"
-              label={`Total (${displayCurrency})`}
-              align="right"
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onClick={onHeaderClick}
-            />
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-          {sorted.map(({ withVal: { item, valuation, latestPrice }, conv }) => (
-            <tr
-              key={item.id}
-              className="hover:bg-zinc-50 dark:hover:bg-zinc-900/40"
-            >
-              <td className="px-4 py-3">
-                <Link
-                  href={`/items/${item.id}`}
-                  className="font-medium hover:underline"
-                >
-                  {item.name}
-                </Link>
-                {(item.setCode || item.cardNumber) && (
-                  <div className="text-xs text-zinc-500">
-                    {[item.setCode, item.cardNumber].filter(Boolean).join(" • ")}
-                  </div>
-                )}
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex flex-wrap gap-1">
-                  {item.tags.map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => toggleTag(t)}
-                      className="cursor-pointer"
-                    >
-                      <TagBadge tag={t} />
-                    </button>
-                  ))}
-                  {item.tags.length === 0 && (
-                    <span className="text-xs text-zinc-400">—</span>
-                  )}
-                </div>
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex flex-wrap gap-1">
-                  {statusesOf(valuation).map((s) => (
-                    <StatusBadge key={s} status={s} />
-                  ))}
-                </div>
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums">
-                {valuation.quantity}
-              </td>
-              <td
-                className={`px-4 py-3 text-right tabular-nums ${
-                  valuation.pendingQuantity > 0
-                    ? "text-amber-700 dark:text-amber-400 font-medium"
-                    : "text-zinc-400"
-                }`}
-                title={
-                  valuation.pendingQuantity > 0
-                    ? "Buys paid for but not yet received"
-                    : undefined
-                }
-              >
-                {valuation.pendingQuantity}
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums text-zinc-500">
-                {valuation.soldQuantity}
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums">
-                <Money
-                  amount={valuation.avgCostCents}
-                  currency={valuation.currency}
-                />
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums font-medium">
-                <Money
-                  amount={valuation.quantity > 0 ? conv.inventoryCost : null}
-                  currency={displayCurrency}
-                />
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums">
-                <Money
-                  amount={latestPrice?.priceCents ?? null}
-                  currency={latestPrice?.currency ?? null}
-                />
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums">
-                <Money amount={conv.totalSpent} currency={displayCurrency} />
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums">
-                <Money amount={conv.realized} currency={displayCurrency} signed />
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums">
-                <Money
-                  amount={latestPrice ? conv.unrealized : null}
-                  currency={displayCurrency}
-                  signed
-                />
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums font-medium">
-                <Money
-                  amount={conv.realized + (latestPrice ? conv.unrealized : 0)}
-                  currency={displayCurrency}
-                  signed
-                />
-              </td>
-            </tr>
-          ))}
-          {sorted.length === 0 && (
+          <thead className="border-b border-zinc-200 dark:border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
             <tr>
-              <td
-                colSpan={13}
-                className="px-4 py-8 text-center text-sm text-zinc-500"
-              >
-                No items match the current filters.
-              </td>
+              <SortHeader
+                col="name"
+                label="Item"
+                align="left"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onClick={onHeaderClick}
+              />
+              <th className="px-4 py-2 font-medium text-left">Tags</th>
+              <SortHeader
+                col="status"
+                label="Status"
+                align="left"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onClick={onHeaderClick}
+              />
+              <SortHeader
+                col="held"
+                label="Held"
+                align="right"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onClick={onHeaderClick}
+              />
+              <SortHeader
+                col="pending"
+                label="Pending"
+                align="right"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onClick={onHeaderClick}
+              />
+              <SortHeader
+                col="sold"
+                label="Sold"
+                align="right"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onClick={onHeaderClick}
+              />
+              <SortHeader
+                col="avgCost"
+                label="Avg cost"
+                align="right"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onClick={onHeaderClick}
+              />
+              <SortHeader
+                col="stockValue"
+                label={`Stock value (${displayCurrency})`}
+                align="right"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onClick={onHeaderClick}
+              />
+              <SortHeader
+                col="market"
+                label="Market"
+                align="right"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onClick={onHeaderClick}
+              />
+              <SortHeader
+                col="totalSpent"
+                label={`Total spent (${displayCurrency})`}
+                align="right"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onClick={onHeaderClick}
+              />
+              <SortHeader
+                col="realized"
+                label={`Realized (${displayCurrency})`}
+                align="right"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onClick={onHeaderClick}
+              />
+              <SortHeader
+                col="unrealized"
+                label={`Unrealized (${displayCurrency})`}
+                align="right"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onClick={onHeaderClick}
+              />
+              <SortHeader
+                col="total"
+                label={`Total (${displayCurrency})`}
+                align="right"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onClick={onHeaderClick}
+              />
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+            {sorted.map(
+              ({ withVal: { item, valuation, latestPrice }, conv }) => (
+                <tr
+                  key={item.id}
+                  className="hover:bg-zinc-50 dark:hover:bg-zinc-900/40"
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <ItemThumb imageUrl={item.imageUrl} name={item.name} />
+                      <div className="min-w-0">
+                        <Link
+                          href={`/items/${item.id}`}
+                          className="font-medium hover:underline"
+                        >
+                          {item.name}
+                        </Link>
+                        {(item.setCode || item.cardNumber) && (
+                          <div className="text-xs text-zinc-500">
+                            {[item.setCode, item.cardNumber]
+                              .filter(Boolean)
+                              .join(" • ")}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {item.tags.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => toggleTag(t)}
+                          className="cursor-pointer"
+                        >
+                          <TagBadge tag={t} />
+                        </button>
+                      ))}
+                      {item.tags.length === 0 && (
+                        <span className="text-xs text-zinc-400">—</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {statusesOf(valuation).map((s) => (
+                        <StatusBadge key={s} status={s} />
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {valuation.quantity}
+                  </td>
+                  <td
+                    className={`px-4 py-3 text-right tabular-nums ${
+                      valuation.pendingQuantity > 0
+                        ? "text-amber-700 dark:text-amber-400 font-medium"
+                        : "text-zinc-400"
+                    }`}
+                    title={
+                      valuation.pendingQuantity > 0
+                        ? "Buys paid for but not yet received"
+                        : undefined
+                    }
+                  >
+                    {valuation.pendingQuantity}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-zinc-500">
+                    {valuation.soldQuantity}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    <Money
+                      amount={valuation.avgCostCents}
+                      currency={valuation.currency}
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums font-medium">
+                    <Money
+                      amount={
+                        valuation.quantity > 0 ? conv.inventoryCost : null
+                      }
+                      currency={displayCurrency}
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    <Money
+                      amount={latestPrice?.priceCents ?? null}
+                      currency={latestPrice?.currency ?? null}
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    <Money
+                      amount={conv.totalSpent}
+                      currency={displayCurrency}
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    <Money
+                      amount={conv.realized}
+                      currency={displayCurrency}
+                      signed
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    <Money
+                      amount={latestPrice ? conv.unrealized : null}
+                      currency={displayCurrency}
+                      signed
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums font-medium">
+                    <Money
+                      amount={
+                        conv.realized + (latestPrice ? conv.unrealized : 0)
+                      }
+                      currency={displayCurrency}
+                      signed
+                    />
+                  </td>
+                </tr>
+              ),
+            )}
+            {sorted.length === 0 && (
+              <tr>
+                <td
+                  colSpan={13}
+                  className="px-4 py-8 text-center text-sm text-zinc-500"
+                >
+                  No items match the current filters.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </Card>
     </div>
   );

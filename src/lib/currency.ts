@@ -102,6 +102,43 @@ export function parseAmount(input: string | number, currency: string): number {
   return minor;
 }
 
+/**
+ * Loose amount parser for user-facing text inputs. Accepts shorthand
+ * suffixes so someone entering a VND price doesn't have to type six
+ * zeros:
+ *
+ *   parseAmountLoose("5m",   "VND") → 5_000_000
+ *   parseAmountLoose("2.5k", "VND") → 2_500
+ *   parseAmountLoose("1.2b", "VND") → 1_200_000_000
+ *   parseAmountLoose("18.50", "USD") → 1850   // still works
+ *
+ * Case-insensitive. Whitespace between the number and suffix is
+ * tolerated ("5 m"). After expansion the result is validated by the
+ * strict `parseAmount` so decimal-place rules per currency still hold.
+ */
+export function parseAmountLoose(
+  input: string | number,
+  currency: string,
+): number {
+  if (typeof input === "number") return parseAmount(input, currency);
+  const raw = input.trim().replace(/,/g, "");
+  const match = raw.match(/^(-?\d+(?:\.\d+)?)\s*([kmb])$/i);
+  if (!match) return parseAmount(input, currency);
+  const [, num, suffix] = match;
+  const multiplier =
+    suffix.toLowerCase() === "k"
+      ? 1_000
+      : suffix.toLowerCase() === "m"
+        ? 1_000_000
+        : 1_000_000_000;
+  const meta = getCurrencyMeta(currency);
+  // Convert to a normalized decimal string with at most meta.exponent
+  // decimal places so parseAmount's regex accepts it.
+  const expanded = Number(num) * multiplier;
+  const fixed = expanded.toFixed(meta.exponent);
+  return parseAmount(fixed, currency);
+}
+
 export function minorToDecimalString(minor: number, currency: string): string {
   const meta = getCurrencyMeta(currency);
   if (meta.exponent === 0) return Math.trunc(minor).toString();

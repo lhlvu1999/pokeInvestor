@@ -5,10 +5,13 @@ import { Money } from "@/components/Money";
 import { ButtonLink, Card, EmptyState, StatCard } from "@/components/ui";
 import { CashflowChart } from "@/components/CashflowChart";
 import { CashflowTagFilter } from "@/components/CashflowTagFilter";
+import { ConcentrationHeatmap } from "@/components/ConcentrationHeatmap";
+import { PortfolioValueChart } from "@/components/PortfolioValueChart";
 import { TagBadge } from "@/components/TagBadge";
 import {
   getDashboardData,
   getMonthlyCashflow,
+  getPortfolioValueSeries,
   rollupByTag,
 } from "@/lib/server/portfolio";
 import { getDisplayCurrency } from "@/lib/server/settings";
@@ -51,9 +54,10 @@ export default async function DashboardPage({
       .map(({ item }) => item.id);
     cashflowItemIds = new Set(matching);
   }
-  const cashflow = await getMonthlyCashflow(displayCurrency, {
-    itemIdsFilter: cashflowItemIds,
-  });
+  const [cashflow, portfolioSeries] = await Promise.all([
+    getMonthlyCashflow(displayCurrency, { itemIdsFilter: cashflowItemIds }),
+    getPortfolioValueSeries(displayCurrency),
+  ]);
 
   const itemsWithMissingPrice = items.filter(
     (i) => i.valuation.quantity > 0 && i.latestPrice == null,
@@ -103,10 +107,7 @@ export default async function DashboardPage({
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            <StatCard
-              label="Invested"
-              hint="Cost of held inventory"
-            >
+            <StatCard label="Invested" hint="Cost of held inventory">
               <Money amount={summary.invested} currency={displayCurrency} />
             </StatCard>
             <StatCard
@@ -117,10 +118,7 @@ export default async function DashboardPage({
                   : "Based on latest market prices"
               }
             >
-              <Money
-                amount={summary.currentValue}
-                currency={displayCurrency}
-              />
+              <Money amount={summary.currentValue} currency={displayCurrency} />
             </StatCard>
             <StatCard label="Realized">
               <Money
@@ -137,17 +135,50 @@ export default async function DashboardPage({
               />
             </StatCard>
             <StatCard label="Total profit">
-              <Money
-                amount={summary.total}
-                currency={displayCurrency}
-                signed
-              />
+              <Money amount={summary.total} currency={displayCurrency} signed />
             </StatCard>
           </div>
 
-          {fxLine && (
-            <div className="text-xs text-zinc-500">FX: {fxLine}</div>
-          )}
+          {fxLine && <div className="text-xs text-zinc-500">FX: {fxLine}</div>}
+
+          <Card className="p-4">
+            <div className="flex items-baseline justify-between flex-wrap gap-2 mb-3">
+              <h2 className="font-medium">
+                Portfolio value over time{" "}
+                <span className="text-xs text-zinc-500 font-normal">
+                  weekly, last 26 weeks
+                </span>
+              </h2>
+              {portfolioSeries.length > 0 && (
+                <div className="text-xs text-zinc-500">
+                  Latest cost basis:{" "}
+                  <Money
+                    amount={
+                      portfolioSeries[portfolioSeries.length - 1].costBasis
+                    }
+                    currency={displayCurrency}
+                  />
+                  {portfolioSeries[portfolioSeries.length - 1].marketValue !=
+                    null && (
+                    <>
+                      {" · market: "}
+                      <Money
+                        amount={
+                          portfolioSeries[portfolioSeries.length - 1]
+                            .marketValue!
+                        }
+                        currency={displayCurrency}
+                      />
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            <PortfolioValueChart
+              data={portfolioSeries}
+              currency={displayCurrency}
+            />
+          </Card>
 
           <Card className="p-4">
             <div className="flex items-baseline justify-between flex-wrap gap-2 mb-3">
@@ -211,6 +242,23 @@ export default async function DashboardPage({
               </div>
             )}
           </Card>
+
+          {tagRollup.length > 0 && (
+            <Card className="p-4">
+              <div className="flex items-baseline justify-between flex-wrap gap-2 mb-3">
+                <h2 className="font-medium">
+                  Concentration{" "}
+                  <span className="text-xs text-zinc-500 font-normal">
+                    inventory value by tag
+                  </span>
+                </h2>
+              </div>
+              <ConcentrationHeatmap
+                rollup={tagRollup}
+                currency={displayCurrency}
+              />
+            </Card>
+          )}
 
           {tagRollup.length > 0 && (
             <Card className="overflow-hidden">
@@ -334,7 +382,11 @@ export default async function DashboardPage({
                   by inventory value
                 </span>
               </h2>
-              <ButtonLink href="/items" variant="secondary" className="h-8 px-3">
+              <ButtonLink
+                href="/items"
+                variant="secondary"
+                className="h-8 px-3"
+              >
                 View all
               </ButtonLink>
             </div>
@@ -352,44 +404,46 @@ export default async function DashboardPage({
               }
               return (
                 <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                  {inStock.slice(0, 6).map(({ withVal: { item, valuation }, conv }) => (
-                    <li
-                      key={item.id}
-                      className="px-4 py-3 flex items-center justify-between gap-4"
-                    >
-                      <div className="min-w-0">
-                        <Link
-                          href={`/items/${item.id}`}
-                          className="font-medium hover:underline truncate block"
-                        >
-                          {item.name}
-                        </Link>
-                        <div className="text-xs text-zinc-500">
-                          {valuation.quantity} held • avg{" "}
-                          <Money
-                            amount={valuation.avgCostCents}
-                            currency={valuation.currency}
-                          />
+                  {inStock
+                    .slice(0, 6)
+                    .map(({ withVal: { item, valuation }, conv }) => (
+                      <li
+                        key={item.id}
+                        className="px-4 py-3 flex items-center justify-between gap-4"
+                      >
+                        <div className="min-w-0">
+                          <Link
+                            href={`/items/${item.id}`}
+                            className="font-medium hover:underline truncate block"
+                          >
+                            {item.name}
+                          </Link>
+                          <div className="text-xs text-zinc-500">
+                            {valuation.quantity} held • avg{" "}
+                            <Money
+                              amount={valuation.avgCostCents}
+                              currency={valuation.currency}
+                            />
+                          </div>
                         </div>
-                      </div>
-                      <div className="text-right tabular-nums">
-                        <div className="text-sm">
-                          <Money
-                            amount={conv.inventoryCost}
-                            currency={displayCurrency}
-                          />
+                        <div className="text-right tabular-nums">
+                          <div className="text-sm">
+                            <Money
+                              amount={conv.inventoryCost}
+                              currency={displayCurrency}
+                            />
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            inventory · unreal{" "}
+                            <Money
+                              amount={conv.unrealized}
+                              currency={displayCurrency}
+                              signed
+                            />
+                          </div>
                         </div>
-                        <div className="text-xs text-zinc-500">
-                          inventory · unreal{" "}
-                          <Money
-                            amount={conv.unrealized}
-                            currency={displayCurrency}
-                            signed
-                          />
-                        </div>
-                      </div>
-                    </li>
-                  ))}
+                      </li>
+                    ))}
                 </ul>
               );
             })()}

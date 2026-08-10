@@ -2,23 +2,45 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { deleteTransaction } from "@/lib/server/transactions";
+import {
+  deleteTransaction,
+  restoreTransaction,
+} from "@/lib/server/transactions";
+import { useToast } from "@/components/Toast";
 
 export function DeleteTransactionButton({ id }: { id: string }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, startTransition] = useTransition();
 
   function handleClick() {
-    if (!confirm("Delete this transaction? Holdings will be recalculated.")) {
-      return;
-    }
+    // Silent delete + undo toast — no confirm dialog. The undo lifeline
+    // covers the "fat finger" case, and confirm() is a nag when you
+    // meant it.
     startTransition(async () => {
       const res = await deleteTransaction(id);
       if (!res.ok) {
-        alert(res.error);
+        toast.show({ kind: "error", message: res.error });
         return;
       }
+      const tx = res.data;
       router.refresh();
+      toast.show({
+        kind: "info",
+        message: `Deleted ${tx.type} of ${tx.quantity}`,
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            const undo = await restoreTransaction(tx);
+            if (!undo.ok) {
+              toast.show({ kind: "error", message: undo.error });
+              return;
+            }
+            router.refresh();
+            toast.show({ kind: "success", message: "Transaction restored" });
+          },
+        },
+      });
     });
   }
 

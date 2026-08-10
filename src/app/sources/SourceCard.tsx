@@ -9,6 +9,7 @@ import {
   updateYoutubeSource,
 } from "@/lib/server/youtube";
 import type { YoutubeBackfillMode, YoutubeSource } from "@/db/schema";
+import type { YoutubeSourceStats } from "@/lib/server/youtube_stats";
 import { BackfillModeFields } from "./AddSourceForm";
 
 function externalUrl(s: YoutubeSource): string {
@@ -32,7 +33,13 @@ function truncatedId(id: string): string {
   return `${id.slice(0, 6)}…${id.slice(-4)}`;
 }
 
-export function SourceCard({ source: s }: { source: YoutubeSource }) {
+export function SourceCard({
+  source: s,
+  stats,
+}: {
+  source: YoutubeSource;
+  stats?: YoutubeSourceStats;
+}) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -49,7 +56,9 @@ export function SourceCard({ source: s }: { source: YoutubeSource }) {
   }
 
   function remove() {
-    if (!confirm(`Remove this ${s.kind}? Historical videos and insights stay.`)) {
+    if (
+      !confirm(`Remove this ${s.kind}? Historical videos and insights stay.`)
+    ) {
       return;
     }
     setErr(null);
@@ -110,13 +119,58 @@ export function SourceCard({ source: s }: { source: YoutubeSource }) {
           {/* Metadata pills row */}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
             <Pill label="Added" value={shortDate(s.addedAt)} />
-            <Pill
-              label="Last discover"
-              value={shortDate(s.lastDiscoveredAt)}
-            />
+            <Pill label="Last discover" value={shortDate(s.lastDiscoveredAt)} />
             <BackfillPill source={s} />
             <StatusPill active={s.active} />
           </div>
+
+          {stats && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
+              <CountPill
+                label="Videos"
+                value={stats.videoCount}
+                tone={stats.videoCount === 0 ? "muted" : "info"}
+              />
+              <CountPill
+                label="Transcripts OK"
+                value={stats.transcriptOk}
+                tone={stats.transcriptOk > 0 ? "success" : "muted"}
+              />
+              {stats.transcriptPending > 0 && (
+                <CountPill
+                  label="Pending"
+                  value={stats.transcriptPending}
+                  tone="warn"
+                />
+              )}
+              {stats.transcriptError > 0 && (
+                <CountPill
+                  label="Errors"
+                  value={stats.transcriptError}
+                  tone="danger"
+                />
+              )}
+              {stats.transcriptMissing > 0 && (
+                <CountPill
+                  label="No captions"
+                  value={stats.transcriptMissing}
+                  tone="muted"
+                />
+              )}
+              <CountPill
+                label="Insights"
+                value={stats.insightCount}
+                tone={stats.insightCount > 0 ? "success" : "muted"}
+              />
+              {stats.insightPending > 0 && (
+                <CountPill
+                  label="Insight pending"
+                  value={stats.insightPending}
+                  tone="warn"
+                />
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right: actions */}
@@ -154,12 +208,55 @@ export function SourceCard({ source: s }: { source: YoutubeSource }) {
         </div>
       )}
 
+      {stats?.lastTranscriptError && (
+        <div className="px-4 sm:px-5 py-2 text-xs border-t border-rose-200/60 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20">
+          <span className="uppercase tracking-wider text-[10px] font-medium text-rose-700 dark:text-rose-400 mr-2">
+            Last transcript error
+            {stats.lastTranscriptErrorAt
+              ? ` · ${shortDate(stats.lastTranscriptErrorAt)}`
+              : ""}
+          </span>
+          <span className="text-rose-800 dark:text-rose-300 break-all">
+            {stats.lastTranscriptError}
+          </span>
+        </div>
+      )}
+
       {editing && (
         <div className="border-t border-zinc-200/60 dark:border-zinc-800/60 p-4 sm:p-5 bg-zinc-50/50 dark:bg-zinc-900/30">
           <EditPanel source={s} onDone={() => setEditing(false)} />
         </div>
       )}
     </Card>
+  );
+}
+
+function CountPill({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "info" | "success" | "warn" | "danger" | "muted";
+}) {
+  const toneClass = {
+    info: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+    success:
+      "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+    warn: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+    danger: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300",
+    muted: "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
+  }[tone];
+  return (
+    <span
+      className={`inline-flex items-baseline gap-1 rounded px-1.5 py-0.5 ${toneClass}`}
+    >
+      <span className="tabular-nums font-medium">{value}</span>
+      <span className="uppercase tracking-wider text-[10px] opacity-80">
+        {label}
+      </span>
+    </span>
   );
 }
 
@@ -296,8 +393,8 @@ function EditPanel({
         <span>
           Re-queue backfill on save{" "}
           <span className="text-xs text-zinc-500">
-            (clears the &ldquo;done&rdquo; flag so the next cron processes
-            this source again)
+            (clears the &ldquo;done&rdquo; flag so the next cron processes this
+            source again)
           </span>
         </span>
       </label>
@@ -309,9 +406,15 @@ function EditPanel({
           Cancel
         </Button>
         {msg && (
-          <span className="text-xs text-emerald-700 dark:text-emerald-400">{msg}</span>
+          <span className="text-xs text-emerald-700 dark:text-emerald-400">
+            {msg}
+          </span>
         )}
-        {err && <span className="text-xs text-rose-600 dark:text-rose-400">{err}</span>}
+        {err && (
+          <span className="text-xs text-rose-600 dark:text-rose-400">
+            {err}
+          </span>
+        )}
       </div>
     </div>
   );

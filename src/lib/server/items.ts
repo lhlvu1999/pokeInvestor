@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, asc, desc, eq, ne } from "drizzle-orm";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
 import {
@@ -36,8 +36,7 @@ function toNullable(v: string | undefined): string | null {
 export type CreateItemInput = z.input<typeof itemSchema>;
 
 export type ActionResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
+  { ok: true; data: T } | { ok: false; error: string };
 
 export async function createItem(
   input: CreateItemInput,
@@ -65,11 +64,133 @@ export async function createItem(
   return { ok: true, data: created };
 }
 
-export async function deleteItem(id: string): Promise<ActionResult<null>> {
+export async function deleteItem(id: string): Promise<ActionResult<Item>> {
+  const [existing] = await db
+    .select()
+    .from(items)
+    .where(eq(items.id, id))
+    .limit(1);
+  if (!existing) return { ok: false, error: "Item not found" };
   await db.delete(items).where(eq(items.id, id));
   revalidatePath("/items");
   revalidatePath("/");
-  return { ok: true, data: null };
+  return { ok: true, data: existing };
+}
+
+/**
+ * Merge `sourceId` into `targetId`: move every transaction, market
+ * price, insight-mention, and alias from source to target, then delete
+ * source. Refuses if the two items don't share a currency (would
+ * corrupt holdings math). Wrapped in a single transaction so a
+ * partial-merge can't leave the DB inconsistent.
+ */
+export async function mergeItems(
+  sourceId: string,
+  targetId: string,
+): Promise<ActionResult<{ targetId: string }>> {
+  if (sourceId === targetId) {
+    return { ok: false, error: "Source and target must differ." };
+  }
+  const [source] = await db
+    .select()
+    .from(items)
+    .where(eq(items.id, sourceId))
+    .limit(1);
+  const [target] = await db
+    .select()
+    .from(items)
+    .where(eq(items.id, targetId))
+    .limit(1);
+  if (!source || !target) return { ok: false, error: "Item not found." };
+
+  // Currency check: gather distinct currencies across both items' txs.
+  const allTxs = await db
+    .select()
+    .from(transactions)
+    .where(sql`item_id in (${sourceId}, ${targetId})`);
+  const currencies = new Set(allTxs.map((t) => t.currency));
+  if (currencies.size > 1) {
+    return {
+      ok: false,
+      error: `Currency mismatch: ${Array.from(currencies).join(" vs ")}. Items must share a currency to merge.`,
+    };
+  }
+
+  // Alias merge — dedupe case-insensitively. The source's name becomes
+  // an alias on the target so future mentions of the old name still
+  // resolve. Skip if it's already an alias or matches the target name.
+  const existingAliases = new Set(
+    (target.aliases ?? []).map((a) => a.toLowerCase()),
+  );
+  const nextAliases = [...(target.aliases ?? [])];
+  const push = (a: string) => {
+    const key = a.trim().toLowerCase();
+    if (!key || key === target.name.toLowerCase() || existingAliases.has(key))
+      return;
+    existingAliases.add(key);
+    nextAliases.push(a.trim());
+  };
+  push(source.name);
+  for (const a of source.aliases ?? []) push(a);
+
+  // Tag merge — union.
+  const nextTags = Array.from(
+    new Set([...(target.tags ?? []), ...(source.tags ?? [])]),
+  );
+
+  try {
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`update transactions set item_id = ${targetId} where item_id = ${sourceId}`,
+      );
+      await tx.execute(
+        sql`update market_prices set item_id = ${targetId} where item_id = ${sourceId}`,
+      );
+      await tx.execute(
+        sql`update youtube_insight_mentions set item_id = ${targetId} where item_id = ${sourceId}`,
+      );
+      await tx
+        .update(items)
+        .set({ aliases: nextAliases, tags: nextTags })
+        .where(eq(items.id, targetId));
+      await tx.delete(items).where(eq(items.id, sourceId));
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error ? `Merge failed: ${err.message}` : "Merge failed",
+    };
+  }
+
+  revalidatePath("/items");
+  revalidatePath("/");
+  revalidatePath(`/items/${targetId}`);
+  return { ok: true, data: { targetId } };
+}
+
+/**
+ * Re-insert a previously deleted item. Called by the toast "Undo"
+ * handler within a few seconds of `deleteItem`. Preserves the original
+ * `id` so any orphaned mentions (which are `on delete set null`) can
+ * theoretically re-link if the row didn't have transactions — in
+ * practice cascade-deleted transactions and market_prices are gone.
+ */
+export async function restoreItem(item: Item): Promise<ActionResult<Item>> {
+  try {
+    await db.insert(items).values(item);
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error
+          ? `Could not restore: ${err.message}`
+          : "Could not restore item",
+    };
+  }
+  revalidatePath("/items");
+  revalidatePath("/");
+  return { ok: true, data: item };
 }
 
 /**
@@ -129,9 +250,7 @@ export async function setItemAliases(
     new Set(
       rawAliases
         .map(normalizeAlias)
-        .filter(
-          (s) => s.length > 0 && s.length <= 120 && s !== canonical,
-        ),
+        .filter((s) => s.length > 0 && s.length <= 120 && s !== canonical),
     ),
   ).slice(0, 30);
 
@@ -224,7 +343,11 @@ export async function renameItem(
   const newKey = itemMatchKey(newName);
 
   return db.transaction(async (tx) => {
-    const [source] = await tx.select().from(items).where(eq(items.id, id)).limit(1);
+    const [source] = await tx
+      .select()
+      .from(items)
+      .where(eq(items.id, id))
+      .limit(1);
     if (!source) return { ok: false as const, error: "Item not found" };
 
     if (itemMatchKey(source.name) === newKey) {
@@ -240,10 +363,7 @@ export async function renameItem(
     }
 
     // Look for another item with the matching key.
-    const allOthers = await tx
-      .select()
-      .from(items)
-      .where(ne(items.id, id));
+    const allOthers = await tx.select().from(items).where(ne(items.id, id));
     const target = allOthers.find((it) => itemMatchKey(it.name) === newKey);
 
     if (!target) {
@@ -311,13 +431,13 @@ export type ItemWithValuation = {
   item: Item;
   valuation: ItemValuation;
   latestPrice: MarketPrice | null;
+  /** Timestamp of the most recent transaction, or null if none. Feeds
+   * the "recently-touched first" default sort on the items list. */
+  lastTxAt: Date | null;
 };
 
 export async function listItemsWithValuations(): Promise<ItemWithValuation[]> {
-  const allItems = await db
-    .select()
-    .from(items)
-    .orderBy(asc(items.name));
+  const allItems = await db.select().from(items).orderBy(asc(items.name));
   if (allItems.length === 0) return [];
 
   const allTxs = await db.select().from(transactions);
@@ -334,10 +454,15 @@ export async function listItemsWithValuations(): Promise<ItemWithValuation[]> {
     const itemTxs = byItem.get(item.id) ?? [];
     const snap = computeHoldings(itemTxs);
     const latestPrice = latestPrices.get(item.id) ?? null;
+    const lastTxAt =
+      itemTxs.length === 0
+        ? null
+        : new Date(Math.max(...itemTxs.map((t) => t.occurredAt.getTime())));
     return {
       item,
       valuation: valueHoldings(snap, latestPrice?.priceCents ?? null),
       latestPrice,
+      lastTxAt,
     };
   });
 }
@@ -365,6 +490,10 @@ export async function getItemDetail(id: string): Promise<ItemDetail | null> {
 
   const snap = computeHoldings(itemTxs);
   const valuation = valueHoldings(snap, latestPrice?.priceCents ?? null);
+  const lastTxAt =
+    itemTxs.length === 0
+      ? null
+      : new Date(Math.max(...itemTxs.map((t) => t.occurredAt.getTime())));
 
-  return { item, valuation, latestPrice, transactions: itemTxs };
+  return { item, valuation, latestPrice, lastTxAt, transactions: itemTxs };
 }

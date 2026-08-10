@@ -5,6 +5,7 @@ import {
   isSupportedCurrency,
   minorToDecimalString,
   parseAmount,
+  parseAmountLoose,
 } from "./currency";
 
 describe("parseAmount", () => {
@@ -31,6 +32,31 @@ describe("parseAmount", () => {
 
   it("rejects unsupported currency", () => {
     expect(() => parseAmount("1", "XYZ")).toThrow();
+  });
+});
+
+describe("parseAmountLoose", () => {
+  it.each([
+    ["5m", "VND", 5_000_000],
+    ["2.5k", "VND", 2_500],
+    ["1.2b", "VND", 1_200_000_000],
+    ["5M", "VND", 5_000_000],
+    ["1 m", "VND", 1_000_000],
+    ["500k", "USD", 50_000_000], // 500,000 USD -> 50,000,000 cents
+    ["1.5k", "USD", 150_000], // 1,500.00 USD -> 150,000 cents
+    ["1,234.56", "USD", 123_456], // plain decimals still work
+    ["1850", "VND", 1850],
+  ])("parses %s %s -> %d", (input, currency, expected) => {
+    expect(parseAmountLoose(input, currency)).toBe(expected);
+  });
+
+  it("rejects garbage suffix", () => {
+    expect(() => parseAmountLoose("5x", "VND")).toThrow();
+  });
+
+  it("rejects sub-minor-unit decimals", () => {
+    // 0.0001 USD is below the cent floor — parseAmount's strict check kicks in.
+    expect(() => parseAmountLoose("0.0001", "USD")).toThrow();
   });
 });
 

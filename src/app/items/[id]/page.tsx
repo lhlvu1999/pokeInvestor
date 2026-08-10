@@ -1,16 +1,19 @@
 export const dynamic = "force-dynamic";
 
+import { Fragment } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { asc, ne } from "drizzle-orm";
 import { db } from "@/db/client";
 import { items as itemsTable } from "@/db/schema";
 import { getItemDetail, listAllTags } from "@/lib/server/items";
+import { ItemThumb } from "@/components/ItemThumb";
 import { Money } from "@/components/Money";
 import { ButtonLink, Card, EmptyState, StatCard } from "@/components/ui";
 import { MarketPriceForm } from "./MarketPriceForm";
 import { DeleteTransactionButton } from "./DeleteTransactionButton";
 import { DeleteItemButton } from "./DeleteItemButton";
+import { MergeItemButton } from "./MergeItemButton";
 import { RefreshPriceButton } from "./RefreshPriceButton";
 import { RenameItemForm } from "./RenameItemForm";
 import { TagEditor } from "./TagEditor";
@@ -54,51 +57,59 @@ export default async function ItemDetailPage({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <Link
-            href="/items"
-            className="text-sm text-zinc-500 hover:underline"
-          >
-            ← Items
-          </Link>
-          <div className="mt-1 flex items-baseline gap-3 flex-wrap">
-            <h1 className="text-2xl font-semibold">{item.name}</h1>
-            <RenameItemForm
-              id={item.id}
-              currentName={item.name}
-              existingNames={otherItems}
-            />
-          </div>
-          {(item.setCode || item.cardNumber) && (
-            <div className="text-sm text-zinc-500">
-              {[item.setCode, item.cardNumber].filter(Boolean).join(" • ")}
-            </div>
-          )}
-          <div className="mt-2">
-            <TagEditor
-              itemId={item.id}
-              initialTags={item.tags}
-              knownTags={knownTags}
-            />
-          </div>
-          <div className="mt-3">
-            <AliasEditor itemId={item.id} initialAliases={item.aliases} />
-          </div>
-          {item.note && (
-            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400 max-w-prose">
-              {item.note}
-            </p>
-          )}
-          {item.sourceUrl && (
-            <a
-              href={item.sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline break-all"
+        <div className="flex items-start gap-4 min-w-0">
+          <ItemThumb
+            imageUrl={item.imageUrl}
+            name={item.name}
+            size={96}
+            className="mt-1"
+          />
+          <div>
+            <Link
+              href="/items"
+              className="text-sm text-zinc-500 hover:underline"
             >
-              {item.sourceUrl} ↗
-            </a>
-          )}
+              ← Items
+            </Link>
+            <div className="mt-1 flex items-baseline gap-3 flex-wrap">
+              <h1 className="text-2xl font-semibold">{item.name}</h1>
+              <RenameItemForm
+                id={item.id}
+                currentName={item.name}
+                existingNames={otherItems}
+              />
+            </div>
+            {(item.setCode || item.cardNumber) && (
+              <div className="text-sm text-zinc-500">
+                {[item.setCode, item.cardNumber].filter(Boolean).join(" • ")}
+              </div>
+            )}
+            <div className="mt-2">
+              <TagEditor
+                itemId={item.id}
+                initialTags={item.tags}
+                knownTags={knownTags}
+              />
+            </div>
+            <div className="mt-3">
+              <AliasEditor itemId={item.id} initialAliases={item.aliases} />
+            </div>
+            {item.note && (
+              <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400 max-w-prose">
+                {item.note}
+              </p>
+            )}
+            {item.sourceUrl && (
+              <a
+                href={item.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline break-all"
+              >
+                {item.sourceUrl} ↗
+              </a>
+            )}
+          </div>
         </div>
         <div className="flex gap-2">
           <ButtonLink
@@ -107,9 +118,7 @@ export default async function ItemDetailPage({
           >
             Log buy
           </ButtonLink>
-          <ButtonLink
-            href={`/transactions/new?itemId=${item.id}&type=sell`}
-          >
+          <ButtonLink href={`/transactions/new?itemId=${item.id}&type=sell`}>
             Log sell
           </ButtonLink>
           <DeleteItemButton
@@ -118,6 +127,13 @@ export default async function ItemDetailPage({
             txCount={txs.length}
           />
         </div>
+      </div>
+      <div className="flex justify-end">
+        <MergeItemButton
+          sourceId={item.id}
+          sourceName={item.name}
+          targets={otherItems}
+        />
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -200,9 +216,7 @@ export default async function ItemDetailPage({
                 title="No transactions yet"
                 description="Log a buy to start tracking holdings."
                 action={
-                  <ButtonLink
-                    href={`/transactions/new?itemId=${item.id}`}
-                  >
+                  <ButtonLink href={`/transactions/new?itemId=${item.id}`}>
                     Add transaction
                   </ButtonLink>
                 }
@@ -226,72 +240,92 @@ export default async function ItemDetailPage({
                     const isPending =
                       tx.type === "buy" && tx.status === "pending";
                     return (
-                      <tr
-                        key={tx.id}
-                        className={isPending ? "bg-amber-50/40 dark:bg-amber-950/10" : ""}
-                      >
-                        <td className="px-4 py-2 whitespace-nowrap text-zinc-500">
-                          {new Date(tx.occurredAt).toLocaleDateString()}
-                        </td>
-                        <td className="px-4 py-2">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={
-                                tx.type === "buy"
-                                  ? "text-emerald-600 dark:text-emerald-400"
-                                  : "text-rose-600 dark:text-rose-400"
-                              }
-                            >
-                              {tx.type === "buy" ? "Buy" : "Sell"}
-                            </span>
+                      <Fragment key={tx.id}>
+                        <tr
+                          className={
+                            isPending
+                              ? "bg-amber-50/40 dark:bg-amber-950/10"
+                              : ""
+                          }
+                        >
+                          <td className="px-4 py-2 whitespace-nowrap text-zinc-500">
+                            {new Date(tx.occurredAt).toLocaleDateString()}
+                          </td>
+                          <td className="px-4 py-2">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={
+                                  tx.type === "buy"
+                                    ? "text-emerald-600 dark:text-emerald-400"
+                                    : "text-rose-600 dark:text-rose-400"
+                                }
+                              >
+                                {tx.type === "buy" ? "Buy" : "Sell"}
+                              </span>
+                              {isPending && (
+                                <span className="inline-flex items-center rounded-full border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                                  On the way
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-2 text-right tabular-nums">
+                            {tx.quantity}
+                          </td>
+                          <td className="px-4 py-2 text-right tabular-nums">
+                            <Money
+                              amount={tx.finalValueCents}
+                              currency={tx.currency}
+                            />
+                            {tx.type === "buy" && (
+                              <div className="mt-0.5">
+                                <InlineShipping
+                                  id={tx.id}
+                                  currency={tx.currency}
+                                  shippingCents={tx.shippingCents ?? null}
+                                />
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-right tabular-nums text-zinc-500">
+                            <Money
+                              amount={Math.round(
+                                tx.finalValueCents / tx.quantity,
+                              )}
+                              currency={tx.currency}
+                            />
+                          </td>
+                          <td className="px-4 py-2 text-right whitespace-nowrap">
                             {isPending && (
-                              <span className="inline-flex items-center rounded-full border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
-                                On the way
+                              <span className="inline-block mr-2 align-middle">
+                                <MarkReceivedButton id={tx.id} />
                               </span>
                             )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-2 text-right tabular-nums">
-                          {tx.quantity}
-                        </td>
-                        <td className="px-4 py-2 text-right tabular-nums">
-                          <Money
-                            amount={tx.finalValueCents}
-                            currency={tx.currency}
-                          />
-                          {tx.type === "buy" && (
-                            <div className="mt-0.5">
-                              <InlineShipping
-                                id={tx.id}
-                                currency={tx.currency}
-                                shippingCents={tx.shippingCents ?? null}
-                              />
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-4 py-2 text-right tabular-nums text-zinc-500">
-                          <Money
-                            amount={Math.round(
-                              tx.finalValueCents / tx.quantity,
-                            )}
-                            currency={tx.currency}
-                          />
-                        </td>
-                        <td className="px-4 py-2 text-right whitespace-nowrap">
-                          {isPending && (
-                            <span className="inline-block mr-2 align-middle">
-                              <MarkReceivedButton id={tx.id} />
-                            </span>
-                          )}
-                          <Link
-                            href={`/transactions/${tx.id}/edit`}
-                            className="text-xs text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 mr-3"
+                            <Link
+                              href={`/transactions/${tx.id}/edit`}
+                              className="text-xs text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 mr-3"
+                            >
+                              Edit
+                            </Link>
+                            <DeleteTransactionButton id={tx.id} />
+                          </td>
+                        </tr>
+                        {tx.note && (
+                          <tr
+                            className={
+                              isPending
+                                ? "bg-amber-50/40 dark:bg-amber-950/10"
+                                : ""
+                            }
                           >
-                            Edit
-                          </Link>
-                          <DeleteTransactionButton id={tx.id} />
-                        </td>
-                      </tr>
+                            <td colSpan={6} className="px-4 pb-3 pt-0">
+                              <div className="text-xs text-zinc-600 dark:text-zinc-400 italic border-l-2 border-zinc-300 dark:border-zinc-700 pl-2 ml-2">
+                                &ldquo;{tx.note}&rdquo;
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </tbody>

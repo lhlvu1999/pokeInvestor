@@ -22,6 +22,7 @@ from typing import Any
 
 from openai import OpenAI, OpenAIError
 
+from poke_pipeline.alerts import send_mention_alerts
 from poke_pipeline.config import load_settings
 from poke_pipeline.db import connection
 from poke_pipeline.llm_io import (
@@ -125,7 +126,7 @@ def run() -> ExtractResult:
     items_index = load_items_index()
 
     processed = skipped = errored = 0
-    for video_id, title, transcript_text in pending:
+    for video_id, title, transcript_text, channel_title in pending:
         if not transcript_text:
             skipped += 1
             continue
@@ -198,7 +199,17 @@ def run() -> ExtractResult:
             skipped += 1
             continue
 
-        _insert_mentions(insight_id, payload, items_index)
+        inserted_mentions = _insert_mentions(insight_id, payload, items_index)
+        if settings.alert_webhook_url:
+            with connection() as conn:
+                send_mention_alerts(
+                    conn,
+                    webhook_url=settings.alert_webhook_url,
+                    video_id=video_id,
+                    video_title=title,
+                    channel_title=channel_title,
+                    mentions=inserted_mentions,
+                )
         processed += 1
 
     return ExtractResult(processed=processed, skipped=skipped, errored=errored)
@@ -207,14 +218,16 @@ def run() -> ExtractResult:
 # ─── DB queries ─────────────────────────────────────────────────────────────
 
 
-def _select_pending(prompt_id: str, *, limit: int) -> list[tuple[str, str, str]]:
-    """Returns `(video_id, title, transcript_text)` for transcripts that
-    don't yet have an insight for the active prompt.
+def _select_pending(
+    prompt_id: str, *, limit: int
+) -> list[tuple[str, str, str, str | None]]:
+    """Returns `(video_id, title, transcript_text, channel_title)` for
+    transcripts that don't yet have an insight for the active prompt.
     """
     with connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            SELECT t.video_id, v.title, t.text
+            SELECT t.video_id, v.title, t.text, v.channel_title
             FROM youtube_transcripts t
             JOIN youtube_videos v ON v.video_id = t.video_id
             LEFT JOIN youtube_insights i
@@ -227,7 +240,10 @@ def _select_pending(prompt_id: str, *, limit: int) -> list[tuple[str, str, str]]
             """,
             (prompt_id, limit),
         )
-        return [(row["video_id"], row["title"], row["text"]) for row in cur.fetchall()]
+        return [
+            (row["video_id"], row["title"], row["text"], row["channel_title"])
+            for row in cur.fetchall()
+        ]
 
 
 def _insert_insight(
@@ -265,10 +281,15 @@ def _insert_mentions(
     insight_id: str,
     payload: dict[str, Any],
     items_index: list[ItemRef],
-) -> None:
+) -> list[dict[str, Any]]:
+    """Insert mention rows and return what was inserted (item_id, raw_name,
+    sentiment, quote) so the caller can post webhook alerts for the
+    matched-item ones.
+    """
+    inserted: list[dict[str, Any]] = []
     mentions = payload.get("mentions")
     if not isinstance(mentions, list):
-        return
+        return inserted
     with connection() as conn, conn.cursor() as cur:
         for m in mentions:
             if not isinstance(m, dict):
@@ -297,6 +318,15 @@ def _insert_mentions(
                     m.get("quote"),
                 ),
             )
+            inserted.append(
+                {
+                    "item_id": item_id,
+                    "raw_name": raw_name,
+                    "sentiment": sentiment,
+                    "quote": m.get("quote"),
+                }
+            )
+    return inserted
 
 
 def _coerce_float(value: Any) -> float | None:

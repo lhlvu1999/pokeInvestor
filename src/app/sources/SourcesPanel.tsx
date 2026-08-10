@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button, Card } from "@/components/ui";
 import type { YoutubeSource } from "@/db/schema";
+import type { YoutubeSourceStats } from "@/lib/server/youtube_stats";
 import { AddSourceForm } from "./AddSourceForm";
 import { SourceCard } from "./SourceCard";
 
@@ -12,7 +13,13 @@ import { SourceCard } from "./SourceCard";
  * is hidden behind a "+ Add source" button to give the list room to breathe;
  * when there are none, it stays open so the page has a single obvious CTA.
  */
-export function SourcesPanel({ sources }: { sources: YoutubeSource[] }) {
+export function SourcesPanel({
+  sources,
+  statsById,
+}: {
+  sources: YoutubeSource[];
+  statsById: Record<string, YoutubeSourceStats>;
+}) {
   const [open, setOpen] = useState(sources.length === 0);
 
   return (
@@ -43,7 +50,7 @@ export function SourcesPanel({ sources }: { sources: YoutubeSource[] }) {
       {sources.length > 0 && (
         <div className="flex flex-col gap-3">
           {sources.map((s) => (
-            <SourceCard key={s.id} source={s} />
+            <SourceCard key={s.id} source={s} stats={statsById[s.id]} />
           ))}
         </div>
       )}

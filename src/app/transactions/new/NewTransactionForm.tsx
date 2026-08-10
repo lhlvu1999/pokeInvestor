@@ -16,8 +16,9 @@ import { CurrencyPicker } from "@/components/CurrencyPicker";
 import {
   formatAmount,
   minorToDecimalString,
-  parseAmount,
+  parseAmountLoose,
 } from "@/lib/currency";
+import { ItemPicker, type PickerOption } from "./ItemPicker";
 
 type Option = { id: string; name: string };
 
@@ -65,9 +66,9 @@ export function NewTransactionForm({
   const totalPreview = useMemo(() => {
     if (itemCostStr.trim() === "") return null;
     try {
-      const itemMinor = parseAmount(itemCostStr, currency);
+      const itemMinor = parseAmountLoose(itemCostStr, currency);
       const shippingMinor =
-        shippingStr.trim() === "" ? 0 : parseAmount(shippingStr, currency);
+        shippingStr.trim() === "" ? 0 : parseAmountLoose(shippingStr, currency);
       const total = itemMinor + shippingMinor;
       return {
         minor: total,
@@ -108,7 +109,8 @@ export function NewTransactionForm({
         quantity,
         finalValue,
         shipping: shippingValue,
-        status: type === "buy" ? (received ? "received" : "pending") : "received",
+        status:
+          type === "buy" ? (received ? "received" : "pending") : "received",
         currency,
         occurredAt: new Date(occurredAtRaw),
         note: String(formData.get("note") ?? ""),
@@ -137,58 +139,22 @@ export function NewTransactionForm({
             : undefined
         }
       >
-        {itemLocked ? (
-          <div className="flex items-center gap-2">
-            <input type="hidden" name="itemId" value={selectedItemId} />
-            <TextInput
-              value={selectedItemName}
-              disabled
-              readOnly
-              className="flex-1"
-            />
-            <ButtonLink
-              href="/transactions/new"
-              variant="secondary"
-              className="px-3 whitespace-nowrap"
-            >
-              Change
-            </ButtonLink>
-          </div>
-        ) : (
-          <div className="flex gap-2">
-            <Select
-              id="itemId"
-              name="itemId"
-              required
+        {(() => {
+          const pickerOptions: PickerOption[] = items.map((it) => ({
+            id: it.id,
+            name: it.name,
+            currency: itemCurrency[it.id] ?? defaultCurrency,
+            held: itemHeld[it.id] ?? 0,
+          }));
+          return (
+            <ItemPicker
+              items={pickerOptions}
               value={selectedItemId}
-              onChange={(e) => setSelectedItemId(e.target.value)}
-              className="flex-1"
-            >
-              <option value="" disabled>
-                Select an item
-              </option>
-              {items.map((it) => {
-                const held = itemHeld[it.id] ?? 0;
-                return (
-                  <option key={it.id} value={it.id}>
-                    {it.name}
-                    {itemCurrency[it.id] ? ` (${itemCurrency[it.id]})` : ""}
-                    {` — ${held} held`}
-                  </option>
-                );
-              })}
-            </Select>
-            <ButtonLink
-              href={`/items/new?returnTo=${encodeURIComponent(
-                `/transactions/new?type=${type}`,
-              )}`}
-              variant="secondary"
-              className="px-3 whitespace-nowrap"
-            >
-              + New item
-            </ButtonLink>
-          </div>
-        )}
+              onChange={setSelectedItemId}
+              locked={itemLocked}
+            />
+          );
+        })()}
       </Field>
 
       <Field label="Type" htmlFor="type">
@@ -262,9 +228,16 @@ export function NewTransactionForm({
             onChange={(e) => setItemCostStr(e.target.value)}
             placeholder="0"
           />
+          <div className="text-[10px] text-zinc-500 mt-1">
+            Tip: <code>5m</code> = 5,000,000 · <code>2.5k</code> = 2,500
+          </div>
         </Field>
         <Field
-          label={type === "buy" ? "Shipping (optional)" : "Shipping you paid (optional)"}
+          label={
+            type === "buy"
+              ? "Shipping (optional)"
+              : "Shipping you paid (optional)"
+          }
           htmlFor="shipping"
         >
           <TextInput
@@ -313,8 +286,25 @@ export function NewTransactionForm({
         />
       </Field>
 
-      <Field label="Note" htmlFor="note">
-        <Textarea id="note" name="note" rows={2} />
+      <Field
+        label={
+          type === "buy"
+            ? "Note — why did you buy this?"
+            : "Note — why did you sell?"
+        }
+        htmlFor="note"
+        hint="A line for your future self. Six months from now, this is the retrospective."
+      >
+        <Textarea
+          id="note"
+          name="note"
+          rows={2}
+          placeholder={
+            type === "buy"
+              ? "e.g. Creator X said this is undervalued after the reprint"
+              : "e.g. Locked in profit; freed capital for the Prismatic Evolutions box"
+          }
+        />
       </Field>
 
       {error && (

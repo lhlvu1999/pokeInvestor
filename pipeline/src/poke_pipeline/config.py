@@ -139,6 +139,13 @@ class Settings:
     The other documented workaround for IP bans. Leave unset to fetch
     directly.
     """
+    alert_webhook_url: str | None
+    """Webhook to POST insight-mention alerts to. Compatible with Slack
+    incoming webhooks, Discord webhooks, and generic JSON endpoints (the
+    body includes both `text` and `content` keys). When unset the pipeline
+    skips alert delivery. Only mentions that link to a *held* item (any
+    prior buy transaction) fire an alert.
+    """
 
     # Tunables — overridable via env, sensible defaults for local dev.
     discover_max_per_source: int = 50
@@ -218,6 +225,7 @@ def load_settings() -> Settings:
         whisper_compute_type=(_optional("WHISPER_COMPUTE_TYPE") or "int8"),
         yt_transcript_cookies_path=_optional("YT_TRANSCRIPT_COOKIES"),
         yt_transcript_proxy_url=_optional("YT_TRANSCRIPT_PROXY"),
+        alert_webhook_url=_optional("ALERT_WEBHOOK_URL"),
         discover_max_per_source=int(_optional("PIPE_DISCOVER_MAX", "50") or "50"),
         insights_batch_limit=int(_optional("PIPE_INSIGHTS_BATCH", "25") or "25"),
         request_timeout_sec=float(

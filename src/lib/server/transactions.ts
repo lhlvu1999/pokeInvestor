@@ -12,7 +12,7 @@ import {
 } from "@/lib/calc/holdings";
 import {
   isSupportedCurrency,
-  parseAmount,
+  parseAmountLoose,
   DEFAULT_TRANSACTION_CURRENCY,
 } from "@/lib/currency";
 import type { ActionResult } from "./items";
@@ -50,7 +50,7 @@ export async function createTransaction(
 
   let finalValueCents: number;
   try {
-    finalValueCents = parseAmount(parsed.data.finalValue, currency);
+    finalValueCents = parseAmountLoose(parsed.data.finalValue, currency);
   } catch (err) {
     return {
       ok: false,
@@ -64,7 +64,7 @@ export async function createTransaction(
   let shippingCents: number | null = null;
   if (parsed.data.shipping && parsed.data.shipping.trim() !== "") {
     try {
-      shippingCents = parseAmount(parsed.data.shipping, currency);
+      shippingCents = parseAmountLoose(parsed.data.shipping, currency);
     } catch (err) {
       return {
         ok: false,
@@ -182,7 +182,10 @@ export async function updateTransaction(
 
   let finalValueCents: number;
   try {
-    finalValueCents = parseAmount(parsed.data.finalValue, existing.currency);
+    finalValueCents = parseAmountLoose(
+      parsed.data.finalValue,
+      existing.currency,
+    );
   } catch (err) {
     return {
       ok: false,
@@ -196,7 +199,7 @@ export async function updateTransaction(
   let shippingCents: number | null = null;
   if (parsed.data.shipping && parsed.data.shipping.trim() !== "") {
     try {
-      shippingCents = parseAmount(parsed.data.shipping, existing.currency);
+      shippingCents = parseAmountLoose(parsed.data.shipping, existing.currency);
     } catch (err) {
       return {
         ok: false,
@@ -276,7 +279,7 @@ export async function updateTransaction(
 
 export async function deleteTransaction(
   id: string,
-): Promise<ActionResult<null>> {
+): Promise<ActionResult<Transaction>> {
   const [tx] = await db
     .select()
     .from(transactions)
@@ -307,7 +310,109 @@ export async function deleteTransaction(
   revalidatePath("/");
   revalidatePath("/items");
   revalidatePath(`/items/${tx.itemId}`);
-  return { ok: true, data: null };
+  return { ok: true, data: tx };
+}
+
+/**
+ * One row in a bulk paste. `itemId` is optional — when null the server
+ * will create a bare item with the provided `itemName` first.
+ */
+export type BulkTransactionInput = {
+  itemId: string | null;
+  itemName: string;
+  type: "buy" | "sell";
+  quantity: number;
+  finalValue: string;
+  currency: string;
+  occurredAt: string;
+};
+
+export type BulkTransactionResult = {
+  createdCount: number;
+  createdItems: number;
+  errors: { row: number; message: string }[];
+};
+
+/**
+ * Batch-create transactions from the paste modal. Any row with a null
+ * `itemId` triggers item creation first. Errors are per-row so a bad
+ * line doesn't cancel the good ones.
+ */
+export async function createTransactionsBulk(
+  rows: BulkTransactionInput[],
+): Promise<ActionResult<BulkTransactionResult>> {
+  const { createItem } = await import("./items");
+  const result: BulkTransactionResult = {
+    createdCount: 0,
+    createdItems: 0,
+    errors: [],
+  };
+  // Cache newly-created item ids by name so duplicate rows in one paste
+  // don't create duplicate items.
+  const newItemIdByName = new Map<string, string>();
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    let itemId = row.itemId;
+    if (!itemId) {
+      const cached = newItemIdByName.get(row.itemName.toLowerCase());
+      if (cached) {
+        itemId = cached;
+      } else {
+        const created = await createItem({ name: row.itemName });
+        if (!created.ok) {
+          result.errors.push({ row: i + 1, message: created.error });
+          continue;
+        }
+        itemId = created.data.id;
+        newItemIdByName.set(row.itemName.toLowerCase(), itemId);
+        result.createdItems += 1;
+      }
+    }
+    const res = await createTransaction({
+      itemId,
+      type: row.type,
+      quantity: row.quantity,
+      finalValue: row.finalValue,
+      currency: row.currency,
+      occurredAt: new Date(row.occurredAt),
+    });
+    if (!res.ok) {
+      result.errors.push({ row: i + 1, message: res.error });
+      continue;
+    }
+    result.createdCount += 1;
+  }
+
+  revalidatePath("/");
+  revalidatePath("/history");
+  revalidatePath("/items");
+  return { ok: true, data: result };
+}
+
+/** Re-insert a previously deleted transaction. Called by the "Undo"
+ * toast handler shortly after `deleteTransaction`. The row is a strict
+ * clone including the original id, so market_prices FKs (which
+ * reference items, not transactions) stay valid. */
+export async function restoreTransaction(
+  tx: Transaction,
+): Promise<ActionResult<Transaction>> {
+  try {
+    await db.insert(transactions).values(tx);
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error
+          ? `Could not restore: ${err.message}`
+          : "Could not restore transaction",
+    };
+  }
+  revalidatePath("/");
+  revalidatePath("/history");
+  revalidatePath("/items");
+  revalidatePath(`/items/${tx.itemId}`);
+  return { ok: true, data: tx };
 }
 
 /**
@@ -345,7 +450,7 @@ export async function setTransactionShipping(
   let shippingCents: number | null = null;
   if (shippingInput.trim() !== "") {
     try {
-      shippingCents = parseAmount(shippingInput, tx.currency);
+      shippingCents = parseAmountLoose(shippingInput, tx.currency);
     } catch (err) {
       return {
         ok: false,
