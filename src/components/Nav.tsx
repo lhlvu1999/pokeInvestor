@@ -41,6 +41,7 @@ const SECTIONS: Section[] = [
       { href: "/analytics", label: "Analytics" },
       { href: "/sources", label: "Sources" },
       { href: "/insights", label: "Insights" },
+      { href: "/ask", label: "Ask" },
     ],
   },
   {
@@ -91,7 +92,10 @@ export function SectionNav() {
         return (
           <Fragment key={section.id}>
             {i > 0 && (
-              <span aria-hidden className="px-2.5 text-zinc-300 dark:text-zinc-700">
+              <span
+                aria-hidden
+                className="px-2.5 text-zinc-300 dark:text-zinc-700"
+              >
                 ·
               </span>
             )}
