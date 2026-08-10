@@ -1,9 +1,10 @@
 export const dynamic = "force-dynamic";
 
-import { desc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { items, transactions } from "@/db/schema";
 import { ButtonLink, EmptyState } from "@/components/ui";
+import { BulkPasteButton, type Existing } from "./BulkPasteButton";
 import { HistoryTable, type HistoryRow } from "./HistoryTable";
 
 export default async function HistoryPage() {
@@ -30,6 +31,21 @@ export default async function HistoryPage() {
     occurredAt: r.occurredAt.toISOString(),
   }));
 
+  // Distinct item names + their most-recent currency for the bulk-paste
+  // preview to match rows against.
+  const existingItems = await db
+    .select({ id: items.id, name: items.name })
+    .from(items)
+    .orderBy(asc(items.name));
+  const currencyByItem = new Map<string, string>();
+  for (const r of rows)
+    if (!currencyByItem.has(r.itemId)) currencyByItem.set(r.itemId, r.currency);
+  const existing: Existing[] = existingItems.map((it) => ({
+    id: it.id,
+    name: it.name,
+    currency: currencyByItem.get(it.id) ?? null,
+  }));
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -46,6 +62,7 @@ export default async function HistoryPage() {
           >
             Export CSV
           </a>
+          <BulkPasteButton existing={existing} />
           <ButtonLink href="/transactions/new">Add transaction</ButtonLink>
         </div>
       </div>

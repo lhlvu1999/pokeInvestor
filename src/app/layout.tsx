@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import { GlobalSearch } from "@/components/GlobalSearch";
 import { SectionNav, SubNav } from "@/components/Nav";
+import { ToastProvider } from "@/components/Toast";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -30,28 +32,33 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-        <header className="border-b border-zinc-200/80 dark:border-zinc-800 bg-white/85 dark:bg-zinc-950/85 backdrop-blur sticky top-0 z-10">
-          {/* Row 1 — brand + top-level sections */}
-          <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
-            <Link
-              href="/"
-              className="flex items-center gap-2 font-semibold tracking-tight"
-            >
-              <Logo />
-              <span>Poke Investor</span>
-            </Link>
-            <SectionNav />
-          </div>
-          {/* Row 2 — sub-tabs for the active section */}
-          <div className="border-t border-zinc-200/60 dark:border-zinc-800/60">
-            <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 h-11 flex items-center">
-              <SubNav />
+        <ToastProvider>
+          <header className="border-b border-zinc-200/80 dark:border-zinc-800 bg-white/85 dark:bg-zinc-950/85 backdrop-blur sticky top-0 z-10">
+            {/* Row 1 — brand + top-level sections */}
+            <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+              <Link
+                href="/"
+                className="flex items-center gap-2 font-semibold tracking-tight"
+              >
+                <Logo />
+                <span>Poke Investor</span>
+              </Link>
+              <div className="flex-1 max-w-md ml-2 hidden md:block">
+                <GlobalSearch />
+              </div>
+              <SectionNav />
             </div>
-          </div>
-        </header>
-        <main className="flex-1 mx-auto w-full max-w-screen-2xl px-4 sm:px-6 py-8">
-          {children}
-        </main>
+            {/* Row 2 — sub-tabs for the active section */}
+            <div className="border-t border-zinc-200/60 dark:border-zinc-800/60">
+              <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 h-11 flex items-center">
+                <SubNav />
+              </div>
+            </div>
+          </header>
+          <main className="flex-1 mx-auto w-full max-w-screen-2xl px-4 sm:px-6 py-8">
+            {children}
+          </main>
+        </ToastProvider>
       </body>
     </html>
   );

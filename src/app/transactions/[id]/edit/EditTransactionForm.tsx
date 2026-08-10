@@ -14,7 +14,7 @@ import {
 import {
   formatAmount,
   minorToDecimalString,
-  parseAmount,
+  parseAmountLoose,
 } from "@/lib/currency";
 
 type EditableTransaction = {
@@ -52,11 +52,11 @@ export function EditTransactionForm({
   const totalPreview = useMemo(() => {
     if (itemCostStr.trim() === "") return null;
     try {
-      const itemMinor = parseAmount(itemCostStr, transaction.currency);
+      const itemMinor = parseAmountLoose(itemCostStr, transaction.currency);
       const shippingMinor =
         shippingStr.trim() === ""
           ? 0
-          : parseAmount(shippingStr, transaction.currency);
+          : parseAmountLoose(shippingStr, transaction.currency);
       const total = itemMinor + shippingMinor;
       return {
         minor: total,

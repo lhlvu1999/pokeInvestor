@@ -13,7 +13,7 @@ import {
 import {
   convertMinor,
   isSupportedCurrency,
-  parseAmount,
+  parseAmountLoose,
   type CurrencyCode,
 } from "@/lib/currency";
 import { fetchProduct, pickBestPriceCents } from "@/lib/pricecharting";
@@ -56,7 +56,7 @@ export async function setManualPrice(
 
   let priceCents: number;
   try {
-    priceCents = parseAmount(parsed.data.price, currency);
+    priceCents = parseAmountLoose(parsed.data.price, currency);
   } catch (err) {
     return {
       ok: false,
@@ -88,9 +88,7 @@ export async function setManualPrice(
  * `pricechartingId`, convert to the item's tracking currency via FX, and write
  * a new row to `market_prices` with source = 'pricecharting'.
  */
-export async function refreshPriceFromPriceCharting(
-  itemId: string,
-): Promise<
+export async function refreshPriceFromPriceCharting(itemId: string): Promise<
   ActionResult<{
     priceCents: number;
     currency: CurrencyCode;

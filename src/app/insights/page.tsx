@@ -2,14 +2,20 @@ export const dynamic = "force-dynamic";
 
 import { Card, EmptyState } from "@/components/ui";
 import { listInsights } from "@/lib/server/insights";
+import { getCreatorScores } from "@/lib/server/creator_scores";
+import { getDashboardData } from "@/lib/server/portfolio";
+import { getSellCandidates } from "@/lib/server/sell_scorecard";
+import { getDisplayCurrency } from "@/lib/server/settings";
 import { getTopSignals, listChannelOptions } from "@/lib/server/signals";
 import {
   DEFAULT_TIME_WINDOW_DAYS,
   SENTIMENT_OPTIONS,
 } from "@/lib/signals-shared";
 import type { MentionSentiment } from "@/db/schema";
+import { CreatorScorecard } from "./CreatorScorecard";
 import { InsightCard } from "./InsightCard";
 import { InsightFilters } from "./InsightFilters";
+import { SellScorecard } from "./SellScorecard";
 import { TopSignals } from "./TopSignals";
 
 type Params = {
@@ -48,17 +54,27 @@ export default async function InsightsPage({
   const sp = await searchParams;
   const filter = parseFilters(sp);
 
-  // Load everything in parallel — signals + channel options + feed.
-  const [signals, channels, insights] = await Promise.all([
-    getTopSignals({ days: filter.days, channelIds: filter.channelIds }),
-    listChannelOptions(),
-    listInsights({
-      days: filter.days,
-      channelIds: filter.channelIds,
-      overallSentiments: filter.sentiments,
-      q: filter.q,
-    }),
-  ]);
+  // Load everything in parallel.
+  const displayCurrency = await getDisplayCurrency();
+  const [signals, channels, insights, creatorScores, dashData] =
+    await Promise.all([
+      getTopSignals({ days: filter.days, channelIds: filter.channelIds }),
+      listChannelOptions(),
+      listInsights({
+        days: filter.days,
+        channelIds: filter.channelIds,
+        overallSentiments: filter.sentiments,
+        q: filter.q,
+      }),
+      getCreatorScores({ days: filter.days, channelIds: filter.channelIds }),
+      getDashboardData(displayCurrency),
+    ]);
+  const sellCandidates = await getSellCandidates({
+    items: dashData.items,
+    converted: dashData.converted,
+    windowDays: filter.days === 0 ? 0 : Math.max(60, filter.days),
+    limit: 10,
+  });
 
   return (
     <div className="flex flex-col gap-6 max-w-5xl">
@@ -85,7 +101,8 @@ export default async function InsightsPage({
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium tracking-wider uppercase text-zinc-500">
-          Top signals ({filter.days === 0 ? "all time" : `last ${filter.days}d`})
+          Top signals ({filter.days === 0 ? "all time" : `last ${filter.days}d`}
+          )
         </h2>
         {signals.length === 0 ? (
           <EmptyState
@@ -95,6 +112,27 @@ export default async function InsightsPage({
         ) : (
           <TopSignals signals={signals} />
         )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium tracking-wider uppercase text-zinc-500">
+          Consider selling{" "}
+          <span className="text-xs text-zinc-500 font-normal normal-case tracking-normal">
+            — held items combining bearish sentiment, hold time, and portfolio
+            concentration
+          </span>
+        </h2>
+        <SellScorecard
+          candidates={sellCandidates}
+          currency={dashData.displayCurrency}
+        />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium tracking-wider uppercase text-zinc-500">
+          Creators ({filter.days === 0 ? "all time" : `last ${filter.days}d`})
+        </h2>
+        <CreatorScorecard scores={creatorScores} />
       </section>
 
       <section className="flex flex-col gap-3">

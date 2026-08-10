@@ -1,5 +1,5 @@
 import { db } from "@/db/client";
-import { transactions } from "@/db/schema";
+import { marketPrices, transactions } from "@/db/schema";
 import {
   type ConvertedItemValues,
   summarizePortfolio,
@@ -10,12 +10,13 @@ import {
   replayItemEvents,
   type CashflowBucket,
 } from "@/lib/calc/cashflow";
+import {
+  computePortfolioSnapshots,
+  weeklySnapshotDates,
+} from "@/lib/calc/portfolio_value";
 import { convertMinor, type CurrencyCode } from "@/lib/currency";
 import { getRate } from "@/lib/fx";
-import {
-  listItemsWithValuations,
-  type ItemWithValuation,
-} from "./items";
+import { listItemsWithValuations, type ItemWithValuation } from "./items";
 
 export type DashboardData = {
   items: ItemWithValuation[];
@@ -276,4 +277,112 @@ export async function getMonthlyCashflow(
   return Array.from(monthly.values()).sort((a, b) =>
     a.month.localeCompare(b.month),
   );
+}
+
+export type PortfolioValuePoint = {
+  date: Date;
+  /** Total cost basis across every currency, converted to display currency. */
+  costBasis: number;
+  /** Total market value in display currency; null when no held item had a
+   * market_prices row on/before this date, so the chart can hide the line. */
+  marketValue: number | null;
+  /** Held-item count across all currencies. */
+  itemsHeld: number;
+  /** How many held items contributed to `marketValue` (for the tooltip). */
+  itemsWithPrice: number;
+};
+
+/**
+ * Weekly portfolio value snapshots (cost basis + market value) over the
+ * last `weeksBack` weeks, all in `displayCurrency`. Market value is `null`
+ * until at least one held item has a `market_prices` row on/before the
+ * snapshot — so the chart can hide the line for pre-tracking history.
+ */
+export async function getPortfolioValueSeries(
+  displayCurrency: CurrencyCode,
+  opts: { weeksBack?: number } = {},
+): Promise<PortfolioValuePoint[]> {
+  const weeksBack = opts.weeksBack ?? 26;
+  const snapshotDates = weeklySnapshotDates(weeksBack);
+
+  const [allTxs, allPrices] = await Promise.all([
+    db.select().from(transactions),
+    db.select().from(marketPrices),
+  ]);
+  if (allTxs.length === 0) return [];
+
+  const txsByItem = new Map<string, typeof allTxs>();
+  const itemCurrencyById = new Map<string, string>();
+  for (const t of allTxs) {
+    const list = txsByItem.get(t.itemId) ?? [];
+    list.push(t);
+    txsByItem.set(t.itemId, list);
+    // computeHoldings enforces one currency per item; grab the first.
+    if (!itemCurrencyById.has(t.itemId)) {
+      itemCurrencyById.set(t.itemId, t.currency);
+    }
+  }
+  const pricesByItem = new Map<string, typeof allPrices>();
+  for (const p of allPrices) {
+    const list = pricesByItem.get(p.itemId) ?? [];
+    list.push(p);
+    pricesByItem.set(p.itemId, list);
+  }
+
+  const snapshots = computePortfolioSnapshots(
+    snapshotDates,
+    txsByItem,
+    pricesByItem,
+    itemCurrencyById,
+  );
+
+  // Resolve FX rates for every non-display currency appearing anywhere.
+  const fromCurrencies = new Set<string>();
+  for (const snap of snapshots) {
+    for (const b of snap.buckets) {
+      if (b.currency !== displayCurrency) fromCurrencies.add(b.currency);
+    }
+  }
+  const rateMap = new Map<string, number>();
+  const rateResults = await Promise.all(
+    Array.from(fromCurrencies).map(async (from) => {
+      try {
+        const r = await getRate(from as CurrencyCode, displayCurrency);
+        return { from, ok: true as const, rate: r.rate };
+      } catch {
+        return { from, ok: false as const };
+      }
+    }),
+  );
+  for (const r of rateResults) {
+    if (r.ok) rateMap.set(r.from, r.rate);
+  }
+
+  return snapshots.map((snap) => {
+    let costBasis = 0;
+    let marketValue = 0;
+    let anyMarketValue = false;
+    let itemsWithPrice = 0;
+    for (const b of snap.buckets) {
+      const rate = b.currency === displayCurrency ? 1 : rateMap.get(b.currency);
+      if (rate == null) continue; // FX missing — skip this bucket's contribution
+      const conv = (m: number) =>
+        b.currency === displayCurrency
+          ? m
+          : convertMinor(m, b.currency, displayCurrency, rate);
+      costBasis += conv(b.costBasis);
+      if (b.marketValue != null) {
+        marketValue += conv(b.marketValue);
+        anyMarketValue = true;
+        itemsWithPrice += b.itemsWithPrice;
+      }
+    }
+    return {
+      date: snap.date,
+      costBasis,
+      marketValue: anyMarketValue ? marketValue : null,
+      itemsHeld: snap.itemsHeld,
+      itemsWithPrice,
+    };
+  });
 }
