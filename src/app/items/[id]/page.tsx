@@ -16,6 +16,12 @@ import { RenameItemForm } from "./RenameItemForm";
 import { TagEditor } from "./TagEditor";
 import { MarkReceivedButton } from "./MarkReceivedButton";
 import { InlineShipping } from "./InlineShipping";
+import { ItemInsights } from "./ItemInsights";
+import { AliasEditor } from "./AliasEditor";
+import {
+  getItemInsightSummary,
+  listMentionsForItem,
+} from "@/lib/server/insights";
 import { DEFAULT_TRANSACTION_CURRENCY } from "@/lib/currency";
 
 export default async function ItemDetailPage({
@@ -37,6 +43,13 @@ export default async function ItemDetailPage({
     .where(ne(itemsTable.id, id))
     .orderBy(asc(itemsTable.name));
   const knownTags = await listAllTags();
+  // Parallel-fetch the YouTube-insight signals for this item. The pipeline
+  // may not have run yet (or this item may have no mentions linked) — both
+  // queries handle that gracefully.
+  const [itemMentions, insightSummary] = await Promise.all([
+    listMentionsForItem(id, { limit: 20 }),
+    getItemInsightSummary(id),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -67,6 +80,9 @@ export default async function ItemDetailPage({
               initialTags={item.tags}
               knownTags={knownTags}
             />
+          </div>
+          <div className="mt-3">
+            <AliasEditor itemId={item.id} initialAliases={item.aliases} />
           </div>
           {item.note && (
             <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400 max-w-prose">
@@ -315,6 +331,12 @@ export default async function ItemDetailPage({
           )}
         </Card>
       </div>
+
+      <ItemInsights
+        itemName={item.name}
+        mentions={itemMentions}
+        summary={insightSummary}
+      />
     </div>
   );
 }

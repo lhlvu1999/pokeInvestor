@@ -4,6 +4,7 @@ import { useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Select, TextInput } from "@/components/ui";
 import {
+  DEFAULT_TIME_WINDOW_DAYS,
   SENTIMENT_OPTIONS,
   TIME_WINDOW_OPTIONS,
 } from "@/lib/signals-shared";
@@ -61,7 +62,7 @@ export function InsightFilters({
     initial.sentiments.length > 0 ||
     initial.channelIds.length > 0 ||
     initial.q.trim().length > 0 ||
-    initial.days !== 30;
+    initial.days !== DEFAULT_TIME_WINDOW_DAYS;
 
   return (
     <div className="flex flex-col gap-3">
@@ -122,7 +123,12 @@ export function InsightFilters({
         {hasFilters && (
           <button
             onClick={() =>
-              update({ days: 30, sentiments: [], channelIds: [], q: "" })
+              update({
+                days: DEFAULT_TIME_WINDOW_DAYS,
+                sentiments: [],
+                channelIds: [],
+                q: "",
+              })
             }
             className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 underline"
           >

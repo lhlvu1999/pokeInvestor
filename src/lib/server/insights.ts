@@ -234,6 +234,8 @@ export async function searchItemsForLink(query: string): Promise<ItemPick[]> {
 const linkSchema = z.object({
   rawName: z.string().trim().min(1),
   itemId: z.string().uuid(),
+  /** When true, also push the rawName onto items.aliases for future auto-matching. */
+  rememberAlias: z.boolean().optional(),
 });
 
 /**
@@ -248,35 +250,58 @@ export async function linkMentionsByRawName(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
 
-  // Make sure the item exists — Drizzle's update wouldn't error if it didn't.
-  const item = await db
-    .select({ id: items.id })
-    .from(items)
-    .where(eq(items.id, parsed.data.itemId))
-    .limit(1);
-  if (!item[0]) {
-    return { ok: false, error: "Item not found." };
-  }
+  return db.transaction(async (tx) => {
+    // Make sure the item exists.
+    const [existing] = await tx
+      .select({ id: items.id, name: items.name, aliases: items.aliases })
+      .from(items)
+      .where(eq(items.id, parsed.data.itemId))
+      .limit(1);
+    if (!existing) {
+      return { ok: false as const, error: "Item not found." };
+    }
 
-  const result = await db
-    .update(youtubeInsightMentions)
-    .set({ itemId: parsed.data.itemId })
-    .where(
-      and(
-        eq(youtubeInsightMentions.rawName, parsed.data.rawName),
-        isNull(youtubeInsightMentions.itemId),
-      ),
-    )
-    .returning({ id: youtubeInsightMentions.id });
+    const result = await tx
+      .update(youtubeInsightMentions)
+      .set({ itemId: parsed.data.itemId })
+      .where(
+        and(
+          eq(youtubeInsightMentions.rawName, parsed.data.rawName),
+          isNull(youtubeInsightMentions.itemId),
+        ),
+      )
+      .returning({ id: youtubeInsightMentions.id });
 
-  revalidatePath("/admin/mentions");
-  revalidatePath("/insights");
-  return { ok: true, data: { updated: result.length } };
+    // Optionally remember the raw name so the matcher catches the next one.
+    if (parsed.data.rememberAlias) {
+      const alias = parsed.data.rawName.trim().toLowerCase().replace(/\s+/g, " ");
+      const canonical = existing.name.trim().toLowerCase().replace(/\s+/g, " ");
+      if (
+        alias.length > 0 &&
+        alias.length <= 120 &&
+        alias !== canonical &&
+        !existing.aliases.includes(alias) &&
+        existing.aliases.length < 30
+      ) {
+        await tx
+          .update(items)
+          .set({ aliases: [...existing.aliases, alias] })
+          .where(eq(items.id, parsed.data.itemId));
+      }
+    }
+
+    revalidatePath("/admin/mentions");
+    revalidatePath("/insights");
+    revalidatePath(`/items/${parsed.data.itemId}`);
+    return { ok: true as const, data: { updated: result.length } };
+  });
 }
 
 const createSchema = z.object({
   rawName: z.string().trim().min(1),
   name: z.string().trim().min(1).max(200),
+  /** When true, add the rawName as an alias on the new item. */
+  rememberAlias: z.boolean().optional(),
 });
 
 /**
@@ -293,9 +318,21 @@ export async function createItemAndLinkMentions(
   }
 
   const created = await db.transaction(async (tx) => {
+    const alias =
+      parsed.data.rememberAlias
+        ? parsed.data.rawName.trim().toLowerCase().replace(/\s+/g, " ")
+        : null;
+    const canonical = parsed.data.name
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+    const initialAliases =
+      alias && alias.length > 0 && alias !== canonical && alias.length <= 120
+        ? [alias]
+        : [];
     const [item] = await tx
       .insert(items)
-      .values({ name: parsed.data.name })
+      .values({ name: parsed.data.name, aliases: initialAliases })
       .returning({ id: items.id });
     const updated = await tx
       .update(youtubeInsightMentions)
@@ -314,4 +351,256 @@ export async function createItemAndLinkMentions(
   revalidatePath("/insights");
   revalidatePath("/items");
   return { ok: true, data: created };
+}
+
+/* ------------------------------------------------------------------ */
+/* Per-item insights (rendered on /items/[id])                         */
+/* ------------------------------------------------------------------ */
+
+export type ItemMention = {
+  mentionId: string;
+  rawName: string;
+  sentiment: MentionSentiment;
+  confidence: number | null;
+  productType: string | null;
+  quote: string | null;
+  timestampSec: number | null;
+  insightId: string;
+  insightCreatedAt: Date;
+  videoId: string;
+  videoTitle: string;
+  videoPublishedAt: Date | null;
+  channelTitle: string | null;
+  channelId: string;
+};
+
+/**
+ * Mentions that the matcher (or a human, via /admin/mentions) linked to a
+ * specific item. Most-recent-video first. Capped to `limit` to keep the
+ * item detail page snappy — for the full picture the user can drill into
+ * /insights with the item name pre-filtered.
+ */
+export async function listMentionsForItem(
+  itemId: string,
+  opts: { limit?: number } = {},
+): Promise<ItemMention[]> {
+  const limit = opts.limit ?? 20;
+  const rows = await db
+    .select({
+      mentionId: youtubeInsightMentions.id,
+      rawName: youtubeInsightMentions.rawName,
+      sentiment: youtubeInsightMentions.sentiment,
+      confidence: youtubeInsightMentions.confidence,
+      productType: youtubeInsightMentions.productType,
+      quote: youtubeInsightMentions.quote,
+      timestampSec: youtubeInsightMentions.timestampSec,
+      insightId: youtubeInsights.id,
+      insightCreatedAt: youtubeInsights.createdAt,
+      videoId: youtubeVideos.videoId,
+      videoTitle: youtubeVideos.title,
+      videoPublishedAt: youtubeVideos.publishedAt,
+      channelTitle: youtubeVideos.channelTitle,
+      channelId: youtubeVideos.channelId,
+    })
+    .from(youtubeInsightMentions)
+    .innerJoin(
+      youtubeInsights,
+      eq(youtubeInsightMentions.insightId, youtubeInsights.id),
+    )
+    .innerJoin(
+      youtubeVideos,
+      eq(youtubeInsights.videoId, youtubeVideos.videoId),
+    )
+    .where(eq(youtubeInsightMentions.itemId, itemId))
+    // Sort by published_at when available, fall back to insight createdAt.
+    .orderBy(
+      desc(sql`COALESCE(${youtubeVideos.publishedAt}, ${youtubeInsights.createdAt})`),
+    )
+    .limit(limit);
+  return rows;
+}
+
+export type ItemInsightSummary = {
+  total: number;
+  bullish: number;
+  bearish: number;
+  neutral: number;
+  mixed: number;
+  /** (bullish − bearish) / max(total, 1), range [-1, 1]. */
+  netSentiment: number;
+  /** Earliest publish/create time across the item's mentions, for "first heard". */
+  firstMentionedAt: Date | null;
+  /** Latest publish/create time. */
+  lastMentionedAt: Date | null;
+  /** Distinct channels that have mentioned the item. */
+  distinctChannels: number;
+};
+
+/**
+ * Aggregate stats across every mention linked to this item. Used for the
+ * little summary header above the mention list on the item detail page.
+ */
+/**
+ * Coerce a value that's typed as Date but may actually be an ISO string
+ * coming back from a raw `sql<Date | null>` aggregate. Drizzle doesn't
+ * auto-parse timestamps inside raw SQL templates — only column-derived
+ * selections get the date hydrator.
+ */
+function toDate(v: unknown): Date | null {
+  if (v == null) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === "string" || typeof v === "number") return new Date(v);
+  return null;
+}
+
+export async function getItemInsightSummary(
+  itemId: string,
+): Promise<ItemInsightSummary> {
+  const [row] = await db
+    .select({
+      total: sql<number>`count(*)::int`,
+      bullish: sql<number>`count(*) FILTER (WHERE ${youtubeInsightMentions.sentiment} = 'bullish')::int`,
+      bearish: sql<number>`count(*) FILTER (WHERE ${youtubeInsightMentions.sentiment} = 'bearish')::int`,
+      neutral: sql<number>`count(*) FILTER (WHERE ${youtubeInsightMentions.sentiment} = 'neutral')::int`,
+      mixed: sql<number>`count(*) FILTER (WHERE ${youtubeInsightMentions.sentiment} = 'mixed')::int`,
+      firstMentionedAt: sql<Date | null>`min(COALESCE(${youtubeVideos.publishedAt}, ${youtubeInsights.createdAt}))`,
+      lastMentionedAt: sql<Date | null>`max(COALESCE(${youtubeVideos.publishedAt}, ${youtubeInsights.createdAt}))`,
+      distinctChannels: sql<number>`count(DISTINCT ${youtubeVideos.channelId})::int`,
+    })
+    .from(youtubeInsightMentions)
+    .innerJoin(
+      youtubeInsights,
+      eq(youtubeInsightMentions.insightId, youtubeInsights.id),
+    )
+    .innerJoin(
+      youtubeVideos,
+      eq(youtubeInsights.videoId, youtubeVideos.videoId),
+    )
+    .where(eq(youtubeInsightMentions.itemId, itemId));
+
+  const total = row?.total ?? 0;
+  return {
+    total,
+    bullish: row?.bullish ?? 0,
+    bearish: row?.bearish ?? 0,
+    neutral: row?.neutral ?? 0,
+    mixed: row?.mixed ?? 0,
+    netSentiment:
+      total === 0 ? 0 : ((row?.bullish ?? 0) - (row?.bearish ?? 0)) / total,
+    firstMentionedAt: toDate(row?.firstMentionedAt),
+    lastMentionedAt: toDate(row?.lastMentionedAt),
+    distinctChannels: row?.distinctChannels ?? 0,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Per-mention controls (item detail panel)                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Unlink a single mention from its currently-linked item. The mention's
+ * raw_name moves back into /admin/mentions as unmatched. Use when the
+ * matcher (or a human) linked it to the wrong item.
+ */
+export async function unlinkMention(
+  mentionId: string,
+): Promise<ActionResult<null>> {
+  const [m] = await db
+    .select({ id: youtubeInsightMentions.id, itemId: youtubeInsightMentions.itemId })
+    .from(youtubeInsightMentions)
+    .where(eq(youtubeInsightMentions.id, mentionId))
+    .limit(1);
+  if (!m) return { ok: false, error: "Mention not found" };
+
+  await db
+    .update(youtubeInsightMentions)
+    .set({ itemId: null })
+    .where(eq(youtubeInsightMentions.id, mentionId));
+  if (m.itemId) revalidatePath(`/items/${m.itemId}`);
+  revalidatePath("/admin/mentions");
+  revalidatePath("/insights");
+  return { ok: true, data: null };
+}
+
+const relinkSchema = z.object({
+  mentionId: z.string().uuid(),
+  newItemId: z.string().uuid(),
+  /** Push the mention's raw name onto the new item's aliases for next-time auto-match. */
+  rememberAlias: z.boolean().optional(),
+});
+
+/**
+ * Re-link a single mention to a different item. Optionally remember the
+ * raw name as an alias on the new item so future occurrences auto-match
+ * to the same place.
+ */
+export async function relinkMention(
+  raw: z.input<typeof relinkSchema>,
+): Promise<ActionResult<{ oldItemId: string | null; newItemId: string }>> {
+  const parsed = relinkSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input",
+    };
+  }
+
+  return db.transaction(async (tx) => {
+    const [mention] = await tx
+      .select({
+        id: youtubeInsightMentions.id,
+        itemId: youtubeInsightMentions.itemId,
+        rawName: youtubeInsightMentions.rawName,
+      })
+      .from(youtubeInsightMentions)
+      .where(eq(youtubeInsightMentions.id, parsed.data.mentionId))
+      .limit(1);
+    if (!mention) {
+      return { ok: false as const, error: "Mention not found" };
+    }
+
+    const [newItem] = await tx
+      .select({
+        id: items.id,
+        name: items.name,
+        aliases: items.aliases,
+      })
+      .from(items)
+      .where(eq(items.id, parsed.data.newItemId))
+      .limit(1);
+    if (!newItem) {
+      return { ok: false as const, error: "Target item not found" };
+    }
+
+    await tx
+      .update(youtubeInsightMentions)
+      .set({ itemId: newItem.id })
+      .where(eq(youtubeInsightMentions.id, mention.id));
+
+    if (parsed.data.rememberAlias) {
+      const alias = mention.rawName.trim().toLowerCase().replace(/\s+/g, " ");
+      const canonical = newItem.name.trim().toLowerCase().replace(/\s+/g, " ");
+      if (
+        alias.length > 0 &&
+        alias.length <= 120 &&
+        alias !== canonical &&
+        !newItem.aliases.includes(alias) &&
+        newItem.aliases.length < 30
+      ) {
+        await tx
+          .update(items)
+          .set({ aliases: [...newItem.aliases, alias] })
+          .where(eq(items.id, newItem.id));
+      }
+    }
+
+    if (mention.itemId) revalidatePath(`/items/${mention.itemId}`);
+    revalidatePath(`/items/${newItem.id}`);
+    revalidatePath("/admin/mentions");
+    revalidatePath("/insights");
+    return {
+      ok: true as const,
+      data: { oldItemId: mention.itemId, newItemId: newItem.id },
+    };
+  });
 }

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Button, TextInput } from "@/components/ui";
+import { Button, Checkbox, TextInput } from "@/components/ui";
 import {
   createItemAndLinkMentions,
   linkMentionsByRawName,
@@ -29,6 +29,12 @@ function UnmatchedRow({ group }: { group: UnmatchedGroup }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  /**
+   * When the raw name differs from the canonical item name (almost always
+   * the case here, since this is *un*matched), persisting it as an alias
+   * makes the next occurrence auto-link. Default on for the obvious win.
+   */
+  const [rememberAlias, setRememberAlias] = useState(true);
 
   async function doSearch(value: string) {
     setQuery(value);
@@ -53,12 +59,17 @@ function UnmatchedRow({ group }: { group: UnmatchedGroup }) {
       const res = await linkMentionsByRawName({
         rawName: group.rawName,
         itemId,
+        rememberAlias,
       });
       if (!res.ok) {
         setErr(res.error);
         return;
       }
-      setMsg(`Linked ${res.data.updated} mention(s).`);
+      setMsg(
+        rememberAlias
+          ? `Linked ${res.data.updated} mention(s) and remembered alias.`
+          : `Linked ${res.data.updated} mention(s).`,
+      );
       router.refresh();
     });
   }
@@ -74,6 +85,7 @@ function UnmatchedRow({ group }: { group: UnmatchedGroup }) {
       const res = await createItemAndLinkMentions({
         rawName: group.rawName,
         name,
+        rememberAlias,
       });
       if (!res.ok) {
         setErr(res.error);
@@ -110,6 +122,17 @@ function UnmatchedRow({ group }: { group: UnmatchedGroup }) {
           {pending ? "Working…" : "Create new"}
         </Button>
       </div>
+
+      <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300 select-none cursor-pointer">
+        <Checkbox
+          checked={rememberAlias}
+          onChange={(e) => setRememberAlias(e.target.checked)}
+        />
+        Remember{" "}
+        <span className="italic">&quot;{group.rawName}&quot;</span> as an alias
+        on the picked item so the matcher catches future mentions
+        automatically.
+      </label>
 
       {searching && (
         <div className="text-xs text-zinc-500">Searching…</div>

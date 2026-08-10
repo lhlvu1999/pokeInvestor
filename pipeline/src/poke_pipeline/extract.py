@@ -31,6 +31,7 @@ from poke_pipeline.llm_io import (
 )
 from poke_pipeline.matching import ItemRef, load_items_index, match_item
 from poke_pipeline.prompts import ActivePrompt, get_active_prompt, render_user_template
+from poke_pipeline.token_budget import estimate_tokens, fit_transcript
 
 log = logging.getLogger(__name__)
 
@@ -80,7 +81,8 @@ def run() -> ExtractResult:
 
     log.info(
         "insights: %d transcript(s) for prompt %s v%d · model=%s [%s] "
-        "temp=%s [%s] · backend=%s json_mode=%s · timeout=%.0fs",
+        "temp=%s [%s] · backend=%s json_mode=%s · timeout=%.0fs · "
+        "ctx=%d max_out=%d head_ratio=%.2f",
         len(pending),
         prompt.name,
         prompt.version,
@@ -91,6 +93,28 @@ def run() -> ExtractResult:
         settings.openai_base_url or "api.openai.com",
         settings.llm_json_mode,
         settings.llm_timeout_sec,
+        settings.llm_context_tokens,
+        settings.llm_max_output_tokens,
+        settings.llm_transcript_head_ratio,
+    )
+
+    # Compute the fixed prompt overhead once per run. This is the
+    # token-cost of *everything but the transcript itself* — the system
+    # prompt (post schema-instruction injection if we're in JSON mode), the
+    # user template with the transcript placeholder removed, plus a small
+    # pad for the chat-completion envelope (role tokens, separators).
+    fixed_overhead_tokens = _estimate_fixed_overhead(
+        prompt, json_mode=settings.llm_json_mode
+    )
+    log.info(
+        "insights: fixed prompt overhead ≈ %d tokens (transcript budget ≈ %d)",
+        fixed_overhead_tokens,
+        max(
+            0,
+            settings.llm_context_tokens
+            - settings.llm_max_output_tokens
+            - fixed_overhead_tokens,
+        ),
     )
 
     client = OpenAI(
@@ -105,12 +129,45 @@ def run() -> ExtractResult:
         if not transcript_text:
             skipped += 1
             continue
+
+        fit = fit_transcript(
+            transcript_text,
+            fixed_overhead_tokens=fixed_overhead_tokens,
+            context_tokens=settings.llm_context_tokens,
+            max_output_tokens=settings.llm_max_output_tokens,
+            head_ratio=settings.llm_transcript_head_ratio,
+            min_transcript_tokens=settings.llm_min_transcript_tokens,
+        )
+        if fit.budget_tokens < settings.llm_min_transcript_tokens:
+            log.error(
+                "skipping %s: transcript budget %d < min %d "
+                "(context=%d, overhead=%d, max_out=%d). "
+                "Increase LLM_CONTEXT_TOKENS or shorten the prompt.",
+                video_id,
+                fit.budget_tokens,
+                settings.llm_min_transcript_tokens,
+                settings.llm_context_tokens,
+                fixed_overhead_tokens,
+                settings.llm_max_output_tokens,
+            )
+            errored += 1
+            continue
+        if fit.clipped:
+            log.warning(
+                "clipping %s: %d → %d tokens (budget %d, head_ratio=%.2f)",
+                video_id,
+                estimate_tokens(transcript_text),
+                fit.estimated_tokens,
+                fit.budget_tokens,
+                settings.llm_transcript_head_ratio,
+            )
+
         try:
             payload, usage, latency_ms = _call_llm(
                 client,
                 prompt,
                 title=title,
-                transcript=transcript_text,
+                transcript=fit.text,
                 json_mode=settings.llm_json_mode,
                 model=effective_model,
                 temperature=effective_temperature,
@@ -258,6 +315,44 @@ def _coerce_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+# ─── Token-budget helpers ────────────────────────────────────────────────────
+
+
+# Empirically derived envelope cost — the chat-completions API spends a
+# handful of tokens on role markers / separators per message. 60 covers
+# two messages (system + user) with comfortable headroom.
+_CHAT_ENVELOPE_TOKENS = 60
+
+
+def _estimate_fixed_overhead(prompt: ActivePrompt, *, json_mode: bool) -> int:
+    """Estimate the token cost of everything but the transcript itself.
+
+    Mirrors the message-assembly that `_call_llm` does — system text
+    (possibly with schema instruction appended) plus the user template
+    with `{{transcript}}` excluded. The result is the input to
+    `fit_transcript` which subtracts it from the context window.
+    """
+    system_text = prompt.system_text
+    if json_mode:
+        system_text = (
+            f"{prompt.system_text}\n\n"
+            f"{build_schema_instruction(prompt.response_schema)}"
+        )
+    # Render the user template with an empty transcript so we measure
+    # everything *around* it — title still gets substituted with a
+    # placeholder of typical length so the estimate isn't biased low.
+    user_skeleton = render_user_template(
+        prompt.user_template,
+        title="placeholder_title_of_typical_length",
+        transcript="",
+    )
+    return (
+        estimate_tokens(system_text)
+        + estimate_tokens(user_skeleton)
+        + _CHAT_ENVELOPE_TOKENS
+    )
 
 
 # ─── OpenAI call ────────────────────────────────────────────────────────────

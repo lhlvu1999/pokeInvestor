@@ -234,12 +234,120 @@ export async function syncSchema(): Promise<ActionResult<SyncSchemaResult>> {
     `ALTER TABLE items ADD COLUMN IF NOT EXISTS pricecharting_id text`,
     `ALTER TABLE items ADD COLUMN IF NOT EXISTS tags text[] NOT NULL DEFAULT ARRAY[]::text[]`,
     `CREATE INDEX IF NOT EXISTS items_tags_idx ON items USING gin (tags)`,
+    `ALTER TABLE items ADD COLUMN IF NOT EXISTS aliases text[] NOT NULL DEFAULT ARRAY[]::text[]`,
+    `CREATE INDEX IF NOT EXISTS items_aliases_idx ON items USING gin (aliases)`,
 
     // transactions: lot tracking, fulfillment status, shipping breakdown.
     `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS lot_id uuid`,
     `CREATE INDEX IF NOT EXISTS transactions_lot_idx ON transactions USING btree (lot_id)`,
     `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS status transaction_status NOT NULL DEFAULT 'received'`,
     `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS shipping_cents bigint`,
+
+    // ── YouTube-insights pipeline ───────────────────────────────────────
+    // Enums first; ENUM types can't run CREATE TYPE IF NOT EXISTS pre-PG10
+    // so use a DO block + duplicate_object exception guard.
+    `DO $$ BEGIN
+       CREATE TYPE youtube_source_kind AS ENUM ('channel', 'video');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `DO $$ BEGIN
+       CREATE TYPE youtube_transcript_status AS ENUM ('ok', 'missing', 'error');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `DO $$ BEGIN
+       CREATE TYPE mention_sentiment AS ENUM ('bullish', 'bearish', 'neutral', 'mixed');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `DO $$ BEGIN
+       CREATE TYPE youtube_backfill_mode AS ENUM ('count', 'days');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+
+    // prompts (no FK)
+    `CREATE TABLE IF NOT EXISTS prompts (
+       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+       name text NOT NULL,
+       version integer NOT NULL,
+       model text NOT NULL,
+       temperature double precision,
+       system_text text NOT NULL,
+       user_template text NOT NULL,
+       response_schema jsonb NOT NULL,
+       is_active boolean NOT NULL DEFAULT false,
+       created_at timestamptz NOT NULL DEFAULT now(),
+       created_by text
+     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS prompts_name_version_uq ON prompts (name, version)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS prompts_one_active_per_name ON prompts (name) WHERE is_active`,
+
+    // youtube_sources (no FK)
+    `CREATE TABLE IF NOT EXISTS youtube_sources (
+       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+       kind youtube_source_kind NOT NULL,
+       external_id text NOT NULL,
+       title text,
+       handle text,
+       active boolean NOT NULL DEFAULT true,
+       added_at timestamptz NOT NULL DEFAULT now(),
+       last_discovered_at timestamptz,
+       backfill_mode youtube_backfill_mode NOT NULL DEFAULT 'count',
+       backfill_max_videos integer NOT NULL DEFAULT 100,
+       backfill_days integer NOT NULL DEFAULT 180,
+       backfilled_at timestamptz
+     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS youtube_sources_kind_external_uq ON youtube_sources (kind, external_id)`,
+    `CREATE INDEX IF NOT EXISTS youtube_sources_active_idx ON youtube_sources (active)`,
+
+    // youtube_videos (FK → youtube_sources, ON DELETE SET NULL)
+    `CREATE TABLE IF NOT EXISTS youtube_videos (
+       video_id text PRIMARY KEY,
+       source_id uuid REFERENCES youtube_sources(id) ON DELETE SET NULL,
+       title text NOT NULL,
+       channel_id text NOT NULL,
+       channel_title text,
+       published_at timestamptz,
+       duration_sec integer,
+       discovered_at timestamptz NOT NULL DEFAULT now()
+     )`,
+    `CREATE INDEX IF NOT EXISTS youtube_videos_source_idx ON youtube_videos (source_id)`,
+    `CREATE INDEX IF NOT EXISTS youtube_videos_published_idx ON youtube_videos (published_at)`,
+
+    // youtube_transcripts (1:1 with videos, ON DELETE CASCADE)
+    `CREATE TABLE IF NOT EXISTS youtube_transcripts (
+       video_id text PRIMARY KEY REFERENCES youtube_videos(video_id) ON DELETE CASCADE,
+       language varchar(16),
+       text text,
+       segments jsonb,
+       status youtube_transcript_status NOT NULL,
+       error_msg text,
+       fetched_at timestamptz NOT NULL DEFAULT now()
+     )`,
+
+    // youtube_insights (FK → videos CASCADE; FK → prompts RESTRICT)
+    `CREATE TABLE IF NOT EXISTS youtube_insights (
+       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+       video_id text NOT NULL REFERENCES youtube_videos(video_id) ON DELETE CASCADE,
+       prompt_id uuid NOT NULL REFERENCES prompts(id) ON DELETE RESTRICT,
+       payload jsonb NOT NULL,
+       input_tokens integer,
+       output_tokens integer,
+       latency_ms integer,
+       created_at timestamptz NOT NULL DEFAULT now()
+     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS youtube_insights_video_prompt_uq ON youtube_insights (video_id, prompt_id)`,
+    `CREATE INDEX IF NOT EXISTS youtube_insights_video_idx ON youtube_insights (video_id)`,
+
+    // youtube_insight_mentions (FK → insights CASCADE; FK → items SET NULL)
+    `CREATE TABLE IF NOT EXISTS youtube_insight_mentions (
+       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+       insight_id uuid NOT NULL REFERENCES youtube_insights(id) ON DELETE CASCADE,
+       item_id uuid REFERENCES items(id) ON DELETE SET NULL,
+       raw_name text NOT NULL,
+       set_hint text,
+       product_type text,
+       sentiment mention_sentiment NOT NULL,
+       confidence double precision,
+       timestamp_sec integer,
+       quote text
+     )`,
+    `CREATE INDEX IF NOT EXISTS youtube_insight_mentions_insight_idx ON youtube_insight_mentions (insight_id)`,
+    `CREATE INDEX IF NOT EXISTS youtube_insight_mentions_item_idx ON youtube_insight_mentions (item_id)`,
   ];
 
   const steps: SyncSchemaStep[] = [];

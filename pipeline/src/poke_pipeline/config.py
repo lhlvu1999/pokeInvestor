@@ -74,6 +74,35 @@ class Settings:
     this back to 300s; for slower local models you may need 3600.
     """
 
+    llm_context_tokens: int
+    """Maximum token context the LLM accepts in a single request. The
+    pipeline clips transcripts so the rendered prompt + reserved output
+    fit under this ceiling — otherwise local runners (Ollama in
+    particular) truncate the head of the prompt, dropping the system
+    instructions and breaking structured outputs.
+
+    Set to the *actual* `OLLAMA_CONTEXT_LENGTH` you started the server
+    with (or your provider's context limit). Default 32768 matches
+    qwen2.5's native context.
+    """
+    llm_max_output_tokens: int
+    """Reserved tokens at the top of the context window for the model's
+    response. The transcript budget is `context - max_output - prompt
+    overhead`. Default 1024 covers our JSON insight schema with room.
+    """
+    llm_transcript_head_ratio: float
+    """Fraction of the transcript budget allocated to the *start* of the
+    video when we have to clip. Remainder goes to the *end*. Pokémon
+    investment videos usually front-load product picks and end with
+    summaries; 0.6 (60% head / 40% tail) preserves both ends. Range [0,1].
+    """
+    llm_min_transcript_tokens: int
+    """If clipping leaves the transcript with fewer than this many tokens
+    of budget, the video is skipped as `errored` instead of producing a
+    near-empty prompt. Defends against pathological overhead/context
+    combinations. Default 500.
+    """
+
     transcript_method: str
     """Which engine fetches transcripts.
       - `youtube_captions` (default): scrape YouTube's timedtext endpoint
@@ -171,6 +200,18 @@ def load_settings() -> Settings:
         llm_temperature_override=temp_value,
         llm_temperature_force_null=temp_force_null,
         llm_timeout_sec=float(_optional("LLM_TIMEOUT_SEC", "1800") or "1800"),
+        llm_context_tokens=int(
+            _optional("LLM_CONTEXT_TOKENS", "32768") or "32768"
+        ),
+        llm_max_output_tokens=int(
+            _optional("LLM_MAX_OUTPUT_TOKENS", "1024") or "1024"
+        ),
+        llm_transcript_head_ratio=float(
+            _optional("LLM_TRANSCRIPT_HEAD_RATIO", "0.6") or "0.6"
+        ),
+        llm_min_transcript_tokens=int(
+            _optional("LLM_MIN_TRANSCRIPT_TOKENS", "500") or "500"
+        ),
         transcript_method=(_optional("TRANSCRIPT_METHOD") or "youtube_captions"),
         whisper_model_size=(_optional("WHISPER_MODEL_SIZE") or "small"),
         whisper_device=(_optional("WHISPER_DEVICE") or "auto"),
