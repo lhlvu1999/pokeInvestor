@@ -79,6 +79,16 @@ youtube_insight_mentions
   confidence double precision null,
   timestamp_sec integer null, quote text null
 
+watchlist_items
+  id uuid, name text, item_id uuid null → items,  -- optional link
+  target_buy_price_cents integer null, currency varchar(3),
+  note text null,
+  added_at timestamptz, hit_at timestamptz null
+  -- Active entries have hit_at IS NULL. When the user buys the product
+  -- or a market price crosses the target, hit_at is set (row kept for
+  -- history). Match creator mentions by item_id when linked, else by
+  -- lower(raw_name) = lower(w.name).
+
 ── useful patterns ────────────────────────────────────────────────────────
 
 -- currently-held quantity per item (buys minus sells, no lot logic)
@@ -104,6 +114,23 @@ JOIN youtube_videos v ON v.video_id = ins.video_id
 WHERE m.sentiment = 'bullish'
   AND COALESCE(v.published_at, v.discovered_at) >= now() - interval '30 days'
 GROUP BY i.name ORDER BY bullish_mentions DESC LIMIT 20;
+
+-- watchlist entries with recent bullish signals (last 30d)
+SELECT w.name,
+       COUNT(*) FILTER (WHERE m.sentiment = 'bullish') AS bullish,
+       COUNT(*) FILTER (WHERE m.sentiment = 'bearish') AS bearish
+FROM watchlist_items w
+LEFT JOIN youtube_insight_mentions m
+  ON (w.item_id IS NOT NULL AND m.item_id = w.item_id)
+   OR (w.item_id IS NULL AND lower(m.raw_name) = lower(w.name))
+LEFT JOIN youtube_insights i ON i.id = m.insight_id
+LEFT JOIN youtube_videos v ON v.video_id = i.video_id
+WHERE w.hit_at IS NULL
+  AND (m.id IS NULL
+       OR COALESCE(v.published_at, v.discovered_at) >= now() - interval '30 days')
+GROUP BY w.id, w.name
+HAVING COUNT(*) FILTER (WHERE m.sentiment = 'bullish') > 0
+ORDER BY bullish DESC;
 
 ── rules ──────────────────────────────────────────────────────────────────
 - Only SELECT statements are allowed. The tool will reject any DDL/DML.

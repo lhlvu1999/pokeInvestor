@@ -28,6 +28,7 @@ const SECTIONS: Section[] = [
     children: [
       { href: "/", label: "Dashboard" },
       { href: "/items", label: "Items" },
+      { href: "/watchlist", label: "Watchlist" },
       { href: "/transactions/new", label: "Add" },
       { href: "/history", label: "History" },
       { href: "/import", label: "Import" },

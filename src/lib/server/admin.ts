@@ -348,6 +348,21 @@ export async function syncSchema(): Promise<ActionResult<SyncSchemaResult>> {
      )`,
     `CREATE INDEX IF NOT EXISTS youtube_insight_mentions_insight_idx ON youtube_insight_mentions (insight_id)`,
     `CREATE INDEX IF NOT EXISTS youtube_insight_mentions_item_idx ON youtube_insight_mentions (item_id)`,
+
+    // watchlist_items (FK → items SET NULL — deleting a linked item
+    // keeps the watchlist entry as a free-form name)
+    `CREATE TABLE IF NOT EXISTS watchlist_items (
+       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+       name text NOT NULL,
+       item_id uuid REFERENCES items(id) ON DELETE SET NULL,
+       target_buy_price_cents integer,
+       currency varchar(3) NOT NULL,
+       note text,
+       added_at timestamptz NOT NULL DEFAULT now(),
+       hit_at timestamptz
+     )`,
+    `CREATE INDEX IF NOT EXISTS watchlist_items_item_idx ON watchlist_items (item_id)`,
+    `CREATE INDEX IF NOT EXISTS watchlist_items_hit_idx ON watchlist_items (hit_at)`,
   ];
 
   const steps: SyncSchemaStep[] = [];

@@ -188,10 +188,11 @@ export const youtubeSourceKindEnum = pgEnum("youtube_source_kind", [
   "video",
 ]);
 
-export const youtubeTranscriptStatusEnum = pgEnum(
-  "youtube_transcript_status",
-  ["ok", "missing", "error"],
-);
+export const youtubeTranscriptStatusEnum = pgEnum("youtube_transcript_status", [
+  "ok",
+  "missing",
+  "error",
+]);
 
 export const mentionSentimentEnum = pgEnum("mention_sentiment", [
   "bullish",
@@ -437,12 +438,64 @@ export const youtubeInsightMentions = pgTable(
   ],
 );
 
+/**
+ * Watchlist: products the user wants to *buy* but hasn't yet. Turns the
+ * app from rear-view (what did I buy?) into forward-looking (what am I
+ * waiting for?). `itemId` is optional — a watchlist entry can exist
+ * before the user has a corresponding item row (useful for products that
+ * don't yet exist in inventory). When set, matcher-linked mentions in
+ * insights will fire alerts and show under the "recent signals" column.
+ *
+ * `hitAt` is set the moment the entry is fulfilled — either the user
+ * clicks "Bought" (auto-converts to a real transaction) or a real
+ * market_price row crosses below the target buy price.
+ */
+export const watchlistItems = pgTable(
+  "watchlist_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** Free-form product name; matches an existing item's name is optional. */
+    name: text("name").notNull(),
+    /** Set when the user explicitly links this entry to a known item so
+     * matcher-driven signals resolve without fuzzy name matching. */
+    itemId: uuid("item_id").references(() => items.id, {
+      onDelete: "set null",
+    }),
+    /** Buy trigger. Null means "watch, no target" — still gets creator
+     * signal aggregation, just no price alert. */
+    targetBuyPriceCents: integer("target_buy_price_cents"),
+    /** ISO 4217 for the target price. Kept even when the price is null
+     * so the UI can suggest a currency when the user adds one later. */
+    currency: varchar("currency", { length: 3 }).notNull(),
+    note: text("note"),
+    addedAt: timestamp("added_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    /** Set the first time a real event fulfilled the watch — user
+     * bought it, or a market_price crossed the target. Null while
+     * still active. */
+    hitAt: timestamp("hit_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("watchlist_items_item_idx").on(t.itemId),
+    index("watchlist_items_hit_idx").on(t.hitAt),
+  ],
+);
+
 // ─── Relations ───────────────────────────────────────────────────────────────
 
 export const itemsRelations = relations(items, ({ many }) => ({
   transactions: many(transactions),
   marketPrices: many(marketPrices),
   insightMentions: many(youtubeInsightMentions),
+  watchlistEntries: many(watchlistItems),
+}));
+
+export const watchlistItemsRelations = relations(watchlistItems, ({ one }) => ({
+  item: one(items, {
+    fields: [watchlistItems.itemId],
+    references: [items.id],
+  }),
 }));
 
 export const transactionsRelations = relations(transactions, ({ one }) => ({
@@ -543,15 +596,15 @@ export type YoutubeTranscript = typeof youtubeTranscripts.$inferSelect;
 export type NewYoutubeTranscript = typeof youtubeTranscripts.$inferInsert;
 export type YoutubeInsight = typeof youtubeInsights.$inferSelect;
 export type NewYoutubeInsight = typeof youtubeInsights.$inferInsert;
-export type YoutubeInsightMention =
-  typeof youtubeInsightMentions.$inferSelect;
+export type YoutubeInsightMention = typeof youtubeInsightMentions.$inferSelect;
 export type NewYoutubeInsightMention =
   typeof youtubeInsightMentions.$inferInsert;
+export type WatchlistItem = typeof watchlistItems.$inferSelect;
+export type NewWatchlistItem = typeof watchlistItems.$inferInsert;
 export type YoutubeSourceKind =
   (typeof youtubeSourceKindEnum.enumValues)[number];
 export type YoutubeTranscriptStatus =
   (typeof youtubeTranscriptStatusEnum.enumValues)[number];
-export type MentionSentiment =
-  (typeof mentionSentimentEnum.enumValues)[number];
+export type MentionSentiment = (typeof mentionSentimentEnum.enumValues)[number];
 export type YoutubeBackfillMode =
   (typeof youtubeBackfillModeEnum.enumValues)[number];
