@@ -99,42 +99,52 @@ export async function getDashboardData(
     });
   }
 
-  const converted: ConvertedItemValues[] = items.map(({ valuation }) => {
-    const c = valuation.currency || displayCurrency;
-    if (c === displayCurrency) {
+  const converted: ConvertedItemValues[] = items.map(
+    ({ valuation, latestPrice }) => {
+      // Carried explicitly rather than inferred from `marketValue > 0`,
+      // which cannot tell an unpriced item from a worthless one.
+      const hasPrice = latestPrice != null;
+      const c = valuation.currency || displayCurrency;
+      if (c === displayCurrency) {
+        return {
+          inventoryCost: valuation.inventoryCostCents,
+          marketValue: valuation.marketValueCents,
+          realized: valuation.realizedProfitCents,
+          unrealized: valuation.unrealizedProfitCents,
+          quantity: valuation.quantity,
+          totalSpent: valuation.totalBoughtCents,
+          totalReceived: valuation.totalSoldCents,
+          hasPrice,
+        };
+      }
+      const rate = rateMap.get(`${c}->${displayCurrency}`);
+      if (rate == null) {
+        return {
+          inventoryCost: 0,
+          marketValue: 0,
+          realized: 0,
+          unrealized: 0,
+          quantity: 0,
+          totalSpent: 0,
+          totalReceived: 0,
+          // FX unavailable: the item is excluded from every total, so it
+          // is not "priced" for coverage purposes either.
+          hasPrice: false,
+        };
+      }
+      const conv = (m: number) => convertMinor(m, c, displayCurrency, rate);
       return {
-        inventoryCost: valuation.inventoryCostCents,
-        marketValue: valuation.marketValueCents,
-        realized: valuation.realizedProfitCents,
-        unrealized: valuation.unrealizedProfitCents,
+        inventoryCost: conv(valuation.inventoryCostCents),
+        marketValue: conv(valuation.marketValueCents),
+        realized: conv(valuation.realizedProfitCents),
+        unrealized: conv(valuation.unrealizedProfitCents),
         quantity: valuation.quantity,
-        totalSpent: valuation.totalBoughtCents,
-        totalReceived: valuation.totalSoldCents,
+        totalSpent: conv(valuation.totalBoughtCents),
+        totalReceived: conv(valuation.totalSoldCents),
+        hasPrice,
       };
-    }
-    const rate = rateMap.get(`${c}->${displayCurrency}`);
-    if (rate == null) {
-      return {
-        inventoryCost: 0,
-        marketValue: 0,
-        realized: 0,
-        unrealized: 0,
-        quantity: 0,
-        totalSpent: 0,
-        totalReceived: 0,
-      };
-    }
-    const conv = (m: number) => convertMinor(m, c, displayCurrency, rate);
-    return {
-      inventoryCost: conv(valuation.inventoryCostCents),
-      marketValue: conv(valuation.marketValueCents),
-      realized: conv(valuation.realizedProfitCents),
-      unrealized: conv(valuation.unrealizedProfitCents),
-      quantity: valuation.quantity,
-      totalSpent: conv(valuation.totalBoughtCents),
-      totalReceived: conv(valuation.totalSoldCents),
-    };
-  });
+    },
+  );
 
   return {
     items,

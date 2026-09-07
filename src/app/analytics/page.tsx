@@ -5,6 +5,8 @@ import { Card, EmptyState, StatCard } from "@/components/ui";
 import { Money } from "@/components/Money";
 import { Histogram } from "@/components/Histogram";
 import { TagBadge } from "@/components/TagBadge";
+import { getPriceAnalytics } from "@/lib/server/price_analytics";
+import { PriceAnalyticsSection } from "./PriceAnalyticsSection";
 import { getAnalyticsData } from "@/lib/server/analytics";
 import { getDisplayCurrency } from "@/lib/server/settings";
 
@@ -31,7 +33,10 @@ function pctColor(p: number | null): string {
 
 export default async function AnalyticsPage() {
   const displayCurrency = await getDisplayCurrency();
-  const data = await getAnalyticsData(displayCurrency);
+  const [data, priceData] = await Promise.all([
+    getAnalyticsData(displayCurrency),
+    getPriceAnalytics(displayCurrency),
+  ]);
   const {
     headline,
     daysHeldHistogram,
@@ -60,9 +65,25 @@ export default async function AnalyticsPage() {
       <div>
         <h1 className="text-2xl font-semibold">Analytics</h1>
         <p className="text-xs text-zinc-500 mt-1">
-          Descriptive analytics over your transaction history. All amounts in {displayCurrency}.
+          Descriptive analytics over your transaction history. All amounts in{" "}
+          {displayCurrency}.
         </p>
       </div>
+
+      {/* Open positions — everything below this depends on market_prices,
+          which the realized/sell-based sections further down do not. */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium tracking-wider uppercase text-zinc-500">
+          Open positions{" "}
+          <span className="text-xs font-normal normal-case tracking-normal text-zinc-500">
+            — what you hold is currently worth, from market prices
+          </span>
+        </h2>
+        <PriceAnalyticsSection
+          data={priceData}
+          displayCurrency={displayCurrency}
+        />
+      </section>
 
       {/* Headline stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -90,10 +111,7 @@ export default async function AnalyticsPage() {
           label="Capital tied up"
           hint={`${headline.itemsInStock} items in stock`}
         >
-          <Money
-            amount={headline.capitalTiedUp}
-            currency={displayCurrency}
-          />
+          <Money amount={headline.capitalTiedUp} currency={displayCurrency} />
         </StatCard>
         <StatCard label="On the way">
           <span className="tabular-nums">{headline.itemsOnTheWay}</span>
@@ -119,7 +137,8 @@ export default async function AnalyticsPage() {
           <Histogram
             buckets={marginHistogram}
             fillClassFor={(b) => {
-              if (b.min >= 0) return "fill-emerald-500/80 dark:fill-emerald-400/70";
+              if (b.min >= 0)
+                return "fill-emerald-500/80 dark:fill-emerald-400/70";
               return "fill-rose-500/80 dark:fill-rose-400/70";
             }}
             tooltipFor={(b) => `${b.label}: ${b.count} sells`}
@@ -137,7 +156,8 @@ export default async function AnalyticsPage() {
           <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
             <h2 className="font-medium">Top winning items</h2>
             <p className="text-xs text-zinc-500 mt-0.5">
-              Biggest net realized profit across all sells, in {displayCurrency}.
+              Biggest net realized profit across all sells, in {displayCurrency}
+              .
             </p>
           </div>
           {topWinners.length === 0 ? (
@@ -190,7 +210,9 @@ export default async function AnalyticsPage() {
                 <tr>
                   <th className="text-left font-medium px-4 py-2">Item</th>
                   <th className="text-left font-medium px-4 py-2">Bought</th>
-                  <th className="text-right font-medium px-4 py-2">Days held</th>
+                  <th className="text-right font-medium px-4 py-2">
+                    Days held
+                  </th>
                   <th className="text-right font-medium px-4 py-2">Qty</th>
                   <th className="text-right font-medium px-4 py-2">
                     Cost ({displayCurrency})
@@ -260,8 +282,12 @@ export default async function AnalyticsPage() {
                   <th className="text-right font-medium px-4 py-2">Items</th>
                   <th className="text-right font-medium px-4 py-2">Sells</th>
                   <th className="text-right font-medium px-4 py-2">Win rate</th>
-                  <th className="text-right font-medium px-4 py-2">Avg margin</th>
-                  <th className="text-right font-medium px-4 py-2">Avg days held</th>
+                  <th className="text-right font-medium px-4 py-2">
+                    Avg margin
+                  </th>
+                  <th className="text-right font-medium px-4 py-2">
+                    Avg days held
+                  </th>
                   <th className="text-right font-medium px-4 py-2">
                     Realized ({displayCurrency})
                   </th>
@@ -270,12 +296,19 @@ export default async function AnalyticsPage() {
               </thead>
               <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
                 {tagScorecards.map((t) => (
-                  <tr key={t.tag} className="hover:bg-zinc-50 dark:hover:bg-zinc-900/40">
+                  <tr
+                    key={t.tag}
+                    className="hover:bg-zinc-50 dark:hover:bg-zinc-900/40"
+                  >
                     <td className="px-4 py-2.5">
                       <TagBadge tag={t.tag} />
                     </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{t.itemCount}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{t.sellsCount}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">
+                      {t.itemCount}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">
+                      {t.sellsCount}
+                    </td>
                     <td className="px-4 py-2.5 text-right tabular-nums">
                       <span className={pctColor(t.winRatePct - 50)}>
                         {fmtPct(t.winRatePct)}
@@ -316,8 +349,8 @@ export default async function AnalyticsPage() {
         <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
           <h2 className="font-medium">Same-item comparison</h2>
           <p className="text-xs text-zinc-500 mt-0.5">
-            For items you&apos;ve transacted multiple times — outcomes side-by-side
-            to spot consistency or variance.
+            For items you&apos;ve transacted multiple times — outcomes
+            side-by-side to spot consistency or variance.
           </p>
         </div>
         {sameItem.length === 0 ? (
@@ -373,7 +406,10 @@ export default async function AnalyticsPage() {
                             <Money amount={l.buyCents} currency={l.currency} />
                           </td>
                           <td className="px-2 py-1 text-right tabular-nums">
-                            <Money amount={l.sellCents ?? null} currency={l.currency} />
+                            <Money
+                              amount={l.sellCents ?? null}
+                              currency={l.currency}
+                            />
                           </td>
                           <td className="px-2 py-1 text-right tabular-nums">
                             <Money
@@ -458,10 +494,7 @@ function ItemPerformanceTable({
                 )}
               </td>
               <td className="px-4 py-2 text-right tabular-nums text-zinc-500">
-                <Money
-                  amount={r.totalCostDisplay}
-                  currency={displayCurrency}
-                />
+                <Money amount={r.totalCostDisplay} currency={displayCurrency} />
               </td>
               <td className="px-4 py-2 text-right tabular-nums text-zinc-500">
                 {fmtDays(r.avgDaysHeld)}
