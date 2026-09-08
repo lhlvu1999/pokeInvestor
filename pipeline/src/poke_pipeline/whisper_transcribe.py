@@ -151,6 +151,24 @@ def _download_audio(
         "no_warnings": True,
         "noplaylist": True,
         "ignoreerrors": False,
+        # Download in ranged chunks instead of one long request.
+        #
+        # This is the fix for "Got error: N bytes read, M more expected".
+        # YouTube throttles a single long-lived range request and drops
+        # the connection partway, so yt-dlp sees a truncated body and
+        # fails the whole download. Splitting into 10 MiB ranges keeps
+        # each request short enough to complete. Costs a few extra round
+        # trips; audio streams here are only ~5-15 MiB.
+        "http_chunk_size": 10 * 1024 * 1024,
+        # Retry transient network failures rather than erroring the video
+        # out on the first blip. `continuedl` lets a retry resume from the
+        # bytes already on disk instead of restarting from zero.
+        "retries": 10,
+        "fragment_retries": 10,
+        "extractor_retries": 3,
+        "continuedl": True,
+        # Without this a stalled read can hang until the process is killed.
+        "socket_timeout": 30,
         "extractor_args": {
             "youtube": {
                 "player_client": list(_AUDIO_PLAYER_CLIENTS),
