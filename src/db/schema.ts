@@ -46,6 +46,17 @@ export const items = pgTable(
     /** Optional PriceCharting product ID for live price fetching. */
     pricechartingId: text("pricecharting_id"),
     /**
+     * Optional override for the eBay Browse search. When null the app
+     * derives a query from `name` plus a default negative-keyword list.
+     *
+     * The escape hatch for products whose name searches badly — graded
+     * slabs in particular, where eBay returns other graders' population
+     * at a tight (and therefore falsely confident) price cluster. Used
+     * verbatim, so an override should carry its own negative keywords,
+     * e.g. `Zekrom ex 210/193 PSA 10 -RGS -CGC -BGS`.
+     */
+    ebayQuery: text("ebay_query"),
+    /**
      * Free-form lowercase tags for grouping items (e.g. "etb", "slab",
      * "booster box"). Stored as a Postgres text array. Indexed for fast
      * `tags @> ARRAY['x']` filtering.

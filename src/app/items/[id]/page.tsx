@@ -15,6 +15,9 @@ import { DeleteTransactionButton } from "./DeleteTransactionButton";
 import { DeleteItemButton } from "./DeleteItemButton";
 import { MergeItemButton } from "./MergeItemButton";
 import { RefreshPriceButton } from "./RefreshPriceButton";
+import { EbayPricePanel } from "./EbayPricePanel";
+import { PriceHistoryChart } from "@/components/PriceHistoryChart";
+import { getItemPriceHistory } from "@/lib/server/price_analytics";
 import { RenameItemForm } from "./RenameItemForm";
 import { TagEditor } from "./TagEditor";
 import { MarkReceivedButton } from "./MarkReceivedButton";
@@ -49,9 +52,10 @@ export default async function ItemDetailPage({
   // Parallel-fetch the YouTube-insight signals for this item. The pipeline
   // may not have run yet (or this item may have no mentions linked) — both
   // queries handle that gracefully.
-  const [itemMentions, insightSummary] = await Promise.all([
+  const [itemMentions, insightSummary, priceHistory] = await Promise.all([
     listMentionsForItem(id, { limit: 20 }),
     getItemInsightSummary(id),
+    getItemPriceHistory(id),
   ]);
 
   return (
@@ -357,6 +361,18 @@ export default async function ItemDetailPage({
               <RefreshPriceButton itemId={item.id} />
             </div>
           )}
+          <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800">
+            <EbayPricePanel itemId={item.id} initialQuery={item.ebayQuery} />
+          </div>
+          <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800">
+            <h3 className="text-xs uppercase tracking-wider text-zinc-500 mb-2">
+              Price history
+            </h3>
+            <PriceHistoryChart
+              points={priceHistory.points}
+              currency={priceHistory.currency ?? itemCurrency}
+            />
+          </div>
           {latestPrice?.source && latestPrice.source !== "manual" && (
             <div className="text-xs text-zinc-500">
               Latest price source: {latestPrice.source} ·{" "}

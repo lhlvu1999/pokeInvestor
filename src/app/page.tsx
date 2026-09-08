@@ -15,6 +15,7 @@ import {
   rollupByTag,
 } from "@/lib/server/portfolio";
 import { getDisplayCurrency } from "@/lib/server/settings";
+import { formatAmount } from "@/lib/currency";
 
 function formatRateLine(
   notes: { from: string; to: string; rate: number; stale: boolean }[],
@@ -59,9 +60,8 @@ export default async function DashboardPage({
     getPortfolioValueSeries(displayCurrency),
   ]);
 
-  const itemsWithMissingPrice = items.filter(
-    (i) => i.valuation.quantity > 0 && i.latestPrice == null,
-  ).length;
+  // Price coverage now comes from `summary` (see summarizePortfolio), which
+  // counts it alongside the cost split so the two stay consistent.
   const fxLine = formatRateLine(fxNotes);
   const totalSpend = cashflow.reduce((s, m) => s + m.spend, 0);
   const totalRevenue = cashflow.reduce((s, m) => s + m.revenue, 0);
@@ -107,14 +107,23 @@ export default async function DashboardPage({
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            <StatCard label="Invested" hint="Cost of held inventory">
+            <StatCard
+              label="Invested"
+              hint={`Cost of all ${summary.itemsHeld} held items`}
+            >
               <Money amount={summary.invested} currency={displayCurrency} />
             </StatCard>
+            {/* Current value can only cover priced items, so its hint states
+                the cost basis of exactly that subset — comparing it against
+                the full `invested` above would overstate a loss. */}
             <StatCard
               label="Current value"
               hint={
-                itemsWithMissingPrice > 0
-                  ? `${itemsWithMissingPrice} item(s) missing market price`
+                summary.unpricedItemsHeld > 0
+                  ? `${summary.pricedItemsHeld} of ${summary.itemsHeld} items · vs ${formatAmount(
+                      summary.investedPriced,
+                      displayCurrency,
+                    )} cost`
                   : "Based on latest market prices"
               }
             >
@@ -127,7 +136,14 @@ export default async function DashboardPage({
                 signed
               />
             </StatCard>
-            <StatCard label="Unrealized">
+            <StatCard
+              label="Unrealized"
+              hint={
+                summary.unpricedItemsHeld > 0
+                  ? `Priced items only (${summary.pricedItemsHeld})`
+                  : undefined
+              }
+            >
               <Money
                 amount={summary.unrealized}
                 currency={displayCurrency}
@@ -138,6 +154,23 @@ export default async function DashboardPage({
               <Money amount={summary.total} currency={displayCurrency} signed />
             </StatCard>
           </div>
+
+          {summary.unpricedItemsHeld > 0 && (
+            <div className="text-xs rounded border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2 text-amber-800 dark:text-amber-300">
+              <strong>{summary.unpricedItemsHeld}</strong> of{" "}
+              {summary.itemsHeld} held items have no market price, covering{" "}
+              <Money
+                amount={summary.investedUnpriced}
+                currency={displayCurrency}
+              />{" "}
+              of cost. <em>Current value</em> and <em>Unrealized</em> above
+              exclude them, so both understate the real position.{" "}
+              <Link href="/items" className="underline hover:no-underline">
+                Update prices
+              </Link>{" "}
+              to close the gap.
+            </div>
+          )}
 
           {fxLine && <div className="text-xs text-zinc-500">FX: {fxLine}</div>}
 

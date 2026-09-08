@@ -2,12 +2,16 @@ export const dynamic = "force-dynamic";
 
 import { ButtonLink, EmptyState } from "@/components/ui";
 import { getDashboardData } from "@/lib/server/portfolio";
+import { listPriceRefreshTargets } from "@/lib/server/prices";
 import { getDisplayCurrency } from "@/lib/server/settings";
+import { BulkPriceRefresh } from "./BulkPriceRefresh";
 import { ItemsTable } from "./ItemsTable";
 
 export default async function ItemsPage() {
   const displayCurrency = await getDisplayCurrency();
   const { items, converted } = await getDashboardData(displayCurrency);
+  // Held items only — no point spending eBay quota on fully-sold positions.
+  const refreshTargets = await listPriceRefreshTargets(true);
 
   return (
     <div className="flex flex-col gap-6">
@@ -20,6 +24,10 @@ export default async function ItemsPage() {
           >
             Export CSV
           </a>
+          <BulkPriceRefresh
+            targets={refreshTargets.eligible}
+            onCooldown={refreshTargets.onCooldown}
+          />
           <ButtonLink href="/items/new">New item</ButtonLink>
         </div>
       </div>

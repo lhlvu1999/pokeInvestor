@@ -232,6 +232,7 @@ export async function syncSchema(): Promise<ActionResult<SyncSchemaResult>> {
     // items: optional metadata + tags.
     `ALTER TABLE items ADD COLUMN IF NOT EXISTS source_url text`,
     `ALTER TABLE items ADD COLUMN IF NOT EXISTS pricecharting_id text`,
+    `ALTER TABLE items ADD COLUMN IF NOT EXISTS ebay_query text`,
     `ALTER TABLE items ADD COLUMN IF NOT EXISTS tags text[] NOT NULL DEFAULT ARRAY[]::text[]`,
     `CREATE INDEX IF NOT EXISTS items_tags_idx ON items USING gin (tags)`,
     `ALTER TABLE items ADD COLUMN IF NOT EXISTS aliases text[] NOT NULL DEFAULT ARRAY[]::text[]`,
