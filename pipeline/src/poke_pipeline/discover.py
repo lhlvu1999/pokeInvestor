@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -41,7 +42,11 @@ def run() -> DiscoverResult:
     log.info("discover: %d active source(s)", len(sources))
 
     total_added = 0
-    for source in sources:
+    for i, source in enumerate(sources):
+        # Space channel fetches apart: YouTube's RSS endpoint blocks bursts
+        # (see _fetch_channel_rss). Cheaper to wait than to burn retries.
+        if i > 0 and source.kind == "channel":
+            time.sleep(_RSS_INTER_SOURCE_DELAY_SEC)
         try:
             if source.kind == "channel":
                 added = _discover_channel(source, settings.discover_max_per_source)
@@ -62,8 +67,82 @@ def run() -> DiscoverResult:
 _CHANNEL_RSS = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 
 
+# YouTube rate-limits the RSS endpoint aggressively and signals it with a
+# misleading 404 or 500 rather than a 429. Measured behaviour: a burst of
+# ~2 requests succeeds, everything after is blocked for roughly 45s, then
+# recovers. Back off across that window instead of dropping the channel.
+_RSS_BACKOFF_SEC = (5.0, 20.0, 45.0)
+# Spacing between channels. Cheap insurance against tripping the limit in
+# the first place — `discover` runs hourly, so a few seconds costs nothing.
+_RSS_INTER_SOURCE_DELAY_SEC = 3.0
+
+
+def _fetch_channel_rss(channel_id: str, settings: Any) -> bytes | None:
+    """Fetch a channel's RSS body, retrying through the rate limit.
+
+    Fetches via httpx rather than letting `feedparser.parse(url)` do its
+    own request, for two reasons:
+
+      1. We get the HTTP status. feedparser hands an error *page* to the
+         XML parser and surfaces "not well-formed (invalid token)" — which
+         reads like a malformed feed when the real problem is a 404, and
+         sent debugging down entirely the wrong path.
+      2. Timeout and redirect behaviour become ours to set, matching
+         `_discover_single_video`.
+    """
+    url = _CHANNEL_RSS.format(channel_id=channel_id)
+    attempts = len(_RSS_BACKOFF_SEC) + 1
+    for attempt in range(attempts):
+        try:
+            resp = httpx.get(
+                url,
+                headers={
+                    "user-agent": _USER_AGENT,
+                    "accept-language": "en-US,en;q=0.9",
+                },
+                timeout=settings.request_timeout_sec,
+                follow_redirects=True,
+            )
+        except httpx.HTTPError as exc:
+            log.warning("RSS fetch failed for channel %s: %s", channel_id, exc)
+            return None
+
+        if resp.status_code == 200:
+            return resp.content
+
+        # 404/500 here almost always means throttled, not missing — the
+        # same channel returns 200 once the window clears.
+        if attempt < len(_RSS_BACKOFF_SEC):
+            delay = _RSS_BACKOFF_SEC[attempt]
+            log.debug(
+                "RSS HTTP %s for channel %s — retrying in %.0fs (attempt %d/%d)",
+                resp.status_code,
+                channel_id,
+                delay,
+                attempt + 1,
+                attempts,
+            )
+            time.sleep(delay)
+            continue
+
+        log.warning(
+            "RSS unavailable for channel %s after %d attempts (last HTTP %s) — "
+            "likely rate-limited; will retry on the next discover run",
+            channel_id,
+            attempts,
+            resp.status_code,
+        )
+        return None
+    return None
+
+
 def _discover_channel(source: src_repo.Source, max_per_source: int) -> int:
-    feed = feedparser.parse(_CHANNEL_RSS.format(channel_id=source.external_id))
+    settings = load_settings()
+    body = _fetch_channel_rss(source.external_id, settings)
+    if body is None:
+        return 0
+
+    feed = feedparser.parse(body)
     if feed.bozo and not feed.entries:
         log.warning(
             "RSS parse failed for channel %s: %s",
