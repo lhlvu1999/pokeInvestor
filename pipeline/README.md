@@ -25,6 +25,8 @@ uv run poke-pipeline backfill     # one-shot deep fetch for newly-added sources
 uv run poke-pipeline discover     # RSS-based video discovery (hourly)
 uv run poke-pipeline transcripts  # youtube-transcript-api fetch
 uv run poke-pipeline insights     # OpenAI structured-output extraction
+uv run poke-pipeline watchlist-alerts   # webhook alert when a watchlist item hits its buy target (daily)
+uv run poke-pipeline watchlist-alerts --dry-run   # show what would be sent; send/write nothing
 uv run poke-pipeline all          # backfill → discover → transcripts → insights
 uv run poke-pipeline -v all       # verbose logging
 ```

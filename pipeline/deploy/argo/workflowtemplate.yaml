@@ -18,7 +18,7 @@ spec:
   arguments:
     parameters:
       - name: phase
-        description: "backfill | discover | transcripts | insights | all"
+        description: "backfill | discover | transcripts | insights | watchlist-alerts | all"
   templates:
     - name: run
       inputs:
@@ -48,6 +48,12 @@ spec:
                 name: poke-pipeline
                 key: OPENAI_API_KEY
                 optional: true                 # only required for `insights`
+          - name: ALERT_WEBHOOK_URL
+            valueFrom:
+              secretKeyRef:
+                name: poke-pipeline
+                key: ALERT_WEBHOOK_URL
+                optional: true                 # `watchlist-alerts` and mention alerts post here
         resources:
           requests:
             cpu: "100m"

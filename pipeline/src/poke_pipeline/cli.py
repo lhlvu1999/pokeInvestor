@@ -15,7 +15,7 @@ import sys
 
 import typer
 
-from poke_pipeline import backfill, discover, extract, transcripts
+from poke_pipeline import backfill, discover, extract, transcripts, watchlist_alerts
 from poke_pipeline.db import close_pool
 
 app = typer.Typer(
@@ -148,6 +148,28 @@ def cmd_insights() -> None:
         typer.echo(
             f"insights: {result.processed} processed, "
             f"{result.skipped} skipped, {result.errored} errored"
+        )
+    finally:
+        close_pool()
+
+
+@app.command("watchlist-alerts")
+def cmd_watchlist_alerts(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print what would be sent; post nothing and change nothing.",
+    ),
+) -> None:
+    """Alert (via ALERT_WEBHOOK_URL) when a watchlist item's market price
+    reaches its buy target. One alert per crossing; re-arms when the price
+    climbs back above target. Run it daily.
+    """
+    try:
+        r = watchlist_alerts.run(dry_run=dry_run)
+        typer.echo(
+            f"watchlist-alerts: {r.checked} checked, {r.alerted} alerted, "
+            f"{r.rearmed} re-armed, {r.skipped} skipped (currency mismatch)"
         )
     finally:
         close_pool()

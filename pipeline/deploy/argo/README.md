@@ -13,6 +13,7 @@ Each phase has its own schedule so a slow `insights` run doesn't delay
 | `cronworkflow-discover.yaml`            | hourly                                                    |
 | `cronworkflow-transcripts.yaml`         | every 15 min                                              |
 | `cronworkflow-insights.yaml`            | every 30 min                                              |
+| `cronworkflow-watchlist-alerts.yaml`    | daily 02:00 UTC — buy-target price alerts via webhook     |
 | `secret.example.yaml`                   | Template — never commit a populated copy                  |
 
 ## Prerequisites
@@ -51,6 +52,7 @@ kubectl apply -f cronworkflow-backfill.yaml
 kubectl apply -f cronworkflow-discover.yaml
 kubectl apply -f cronworkflow-transcripts.yaml
 kubectl apply -f cronworkflow-insights.yaml
+kubectl apply -f cronworkflow-watchlist-alerts.yaml
 ```
 
 ## Trigger manually
@@ -74,6 +76,7 @@ Defaults in `workflowtemplate.yaml`:
 | discover     | seconds                 | RSS fetch per channel, cheap         |
 | transcripts  | ~1s/video               | Network-bound on YouTube responses   |
 | insights     | seconds–minutes/video   | LLM call dominates; budget for cost  |
+| watchlist-alerts | seconds             | One SQL query plus at most one webhook POST |
 
 If insights runs frequently exceed memory, raise the `limits.memory` — the
 extractor holds one transcript in RAM at a time but token counts vary.
