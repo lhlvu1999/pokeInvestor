@@ -206,13 +206,13 @@ export function ItemPicker({
                   type="button"
                   onClick={() => pick(it.id)}
                   onMouseEnter={() => setActive(i)}
-                  className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-sm ${
+                  className={`w-full text-left px-3 py-2.5 sm:py-2 flex flex-col items-start sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 text-sm ${
                     i === active
                       ? "bg-zinc-100 dark:bg-zinc-800"
                       : "hover:bg-zinc-50 dark:hover:bg-zinc-900"
                   }`}
                 >
-                  <span className="truncate">{it.name}</span>
+                  <span className="sm:truncate max-w-full">{it.name}</span>
                   <span className="text-[11px] text-zinc-500 whitespace-nowrap">
                     {it.held} held
                     {it.marketMinor != null && it.marketMinor > 0

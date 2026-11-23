@@ -139,7 +139,7 @@ export function BulkPasteButton({ existing }: { existing: Existing[] }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center justify-center gap-2 rounded-md px-4 h-10 text-sm font-medium border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+        className="inline-flex flex-1 sm:flex-none items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 h-10 text-sm font-medium border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
       >
         Paste bulk
       </button>

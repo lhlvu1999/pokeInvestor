@@ -15,12 +15,16 @@ export default async function ItemsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Items</h1>
-        <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-3">
+        <h1 className="text-2xl font-semibold mr-auto">Items</h1>
+        {/* Phones: title + New item on one row, the secondary actions below. */}
+        <ButtonLink href="/items/new" className="order-2 sm:order-3">
+          New item
+        </ButtonLink>
+        <div className="order-3 sm:order-2 flex gap-2 w-full sm:w-auto">
           <a
             href="/api/export/transactions"
-            className="inline-flex items-center justify-center gap-2 rounded-md px-4 h-10 text-sm font-medium border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 h-10 text-sm font-medium border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
             Export CSV
           </a>
@@ -28,7 +32,6 @@ export default async function ItemsPage() {
             targets={refreshTargets.eligible}
             onCooldown={refreshTargets.onCooldown}
           />
-          <ButtonLink href="/items/new">New item</ButtonLink>
         </div>
       </div>
 

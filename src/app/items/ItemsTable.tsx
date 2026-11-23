@@ -321,8 +321,8 @@ export function ItemsTable({
         </div>
       </div>
       {allTags.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-zinc-500 mr-1">Filter by tag:</span>
+        <div className="flex items-center gap-1.5 overflow-x-auto sm:flex-wrap sm:overflow-visible -mx-4 px-4 sm:mx-0 sm:px-0 pb-1 sm:pb-0">
+          <span className="text-xs text-zinc-500 mr-1 shrink-0">Tags:</span>
           {allTags.map((tag) => {
             const active = activeTags.includes(tag);
             return (
@@ -330,7 +330,7 @@ export function ItemsTable({
                 key={tag}
                 type="button"
                 onClick={() => toggleTag(tag)}
-                className={`text-[10px] rounded-full px-2 py-0.5 border ${
+                className={`shrink-0 text-xs sm:text-[10px] rounded-full px-3 py-1.5 sm:px-2 sm:py-0.5 border ${
                   active
                     ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900"
                     : "border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
@@ -344,14 +344,40 @@ export function ItemsTable({
             <button
               type="button"
               onClick={() => setActiveTags([])}
-              className="text-[10px] text-zinc-500 hover:underline ml-1"
+              className="shrink-0 text-xs sm:text-[10px] text-zinc-500 hover:underline ml-1 px-2 py-1.5 sm:p-0"
             >
               clear
             </button>
           )}
         </div>
       )}
-      <div className="text-[11px] text-zinc-500">
+      <div className="flex items-center gap-2 sm:hidden">
+        <Select
+          value={sortKey}
+          onChange={(e) => {
+            const key = e.target.value as SortKey;
+            setSortKey(key);
+            setSortDir(NUMERIC_KEYS.includes(key) ? "desc" : "asc");
+          }}
+          aria-label="Sort by"
+          className="flex-1"
+        >
+          {MOBILE_SORTS.map(([key, label]) => (
+            <option key={key} value={key}>
+              Sort: {label}
+            </option>
+          ))}
+        </Select>
+        <button
+          type="button"
+          onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+          aria-label={sortDir === "asc" ? "Ascending" : "Descending"}
+          className="h-10 w-10 shrink-0 rounded-lg border border-zinc-300 dark:border-zinc-700 text-sm"
+        >
+          {sortDir === "asc" ? "▲" : "▼"}
+        </button>
+      </div>
+      <div className="hidden sm:block text-[11px] text-zinc-500">
         Sorted by{" "}
         <span className="font-medium text-zinc-700 dark:text-zinc-300">
           {sortKey === "recent"
@@ -371,7 +397,25 @@ export function ItemsTable({
           </button>
         )}
       </div>
-      <Card className="overflow-x-auto">
+      <Card className="sm:hidden divide-y divide-zinc-200 dark:divide-zinc-800">
+        {sorted.map(({ withVal: { item, valuation, latestPrice }, conv }) => (
+          <ItemCard
+            key={item.id}
+            item={item}
+            valuation={valuation}
+            latestPrice={latestPrice}
+            conv={conv}
+            displayCurrency={displayCurrency}
+            onTag={toggleTag}
+          />
+        ))}
+        {sorted.length === 0 && (
+          <div className="px-4 py-8 text-center text-sm text-zinc-500">
+            No items match the current filters.
+          </div>
+        )}
+      </Card>
+      <Card className="hidden sm:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="border-b border-zinc-200 dark:border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
             <tr>
@@ -610,6 +654,127 @@ export function ItemsTable({
           </tbody>
         </table>
       </Card>
+    </div>
+  );
+}
+
+const MOBILE_SORTS: [SortKey, string][] = [
+  ["recent", "Recently updated"],
+  ["name", "Name"],
+  ["stockValue", "Stock value"],
+  ["total", "Total profit"],
+  ["unrealized", "Unrealized"],
+  ["realized", "Realized"],
+  ["held", "Held"],
+  ["market", "Market price"],
+  ["avgCost", "Avg cost"],
+  ["totalSpent", "Total spent"],
+  ["status", "Status"],
+];
+
+/** One item as a phone-sized card: the numbers that matter, no sideways scroll. */
+function ItemCard({
+  item,
+  valuation,
+  latestPrice,
+  conv,
+  displayCurrency,
+  onTag,
+}: {
+  item: ItemWithValuation["item"];
+  valuation: ItemWithValuation["valuation"];
+  latestPrice: ItemWithValuation["latestPrice"];
+  conv: ConvertedItemValues;
+  displayCurrency: string;
+  onTag: (tag: string) => void;
+}) {
+  const total = conv.realized + (latestPrice ? conv.unrealized : 0);
+  const sub = [item.setCode, item.cardNumber].filter(Boolean).join(" • ");
+  return (
+    <div className="p-3 flex gap-3">
+      <ItemThumb imageUrl={item.imageUrl} name={item.name} size={48} />
+      <div className="min-w-0 flex-1">
+        <ItemLink
+          itemId={item.id}
+          className="font-medium leading-snug hover:underline block"
+        >
+          {item.name}
+        </ItemLink>
+        {sub && <div className="text-xs text-zinc-500">{sub}</div>}
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {statusesOf(valuation).map((s) => (
+            <StatusBadge key={s} status={s} />
+          ))}
+          {item.tags.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => onTag(t)}
+              className="cursor-pointer"
+            >
+              <TagBadge tag={t} />
+            </button>
+          ))}
+        </div>
+        <dl className="grid grid-cols-3 gap-x-2 gap-y-1.5 mt-2.5 text-xs">
+          <CardStat label="Held">
+            <span className="tabular-nums">{valuation.quantity}</span>
+            {valuation.pendingQuantity > 0 && (
+              <span className="text-amber-700 dark:text-amber-400">
+                {" "}
+                +{valuation.pendingQuantity}
+              </span>
+            )}
+          </CardStat>
+          <CardStat label="Market">
+            <Money
+              amount={latestPrice?.priceCents ?? null}
+              currency={latestPrice?.currency ?? null}
+            />
+          </CardStat>
+          <CardStat label="Stock value">
+            <Money
+              amount={valuation.quantity > 0 ? conv.inventoryCost : null}
+              currency={displayCurrency}
+            />
+          </CardStat>
+          <CardStat label="Avg cost">
+            <Money
+              amount={valuation.quantity > 0 ? valuation.avgCostCents : null}
+              currency={valuation.currency}
+            />
+          </CardStat>
+          <CardStat label="Realized">
+            <Money amount={conv.realized} currency={displayCurrency} signed />
+          </CardStat>
+          <CardStat label="Total" strong>
+            <Money amount={total} currency={displayCurrency} signed />
+          </CardStat>
+        </dl>
+      </div>
+    </div>
+  );
+}
+
+function CardStat({
+  label,
+  strong,
+  children,
+}: {
+  label: string;
+  strong?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[10px] uppercase tracking-wide text-zinc-500">
+        {label}
+      </dt>
+      <dd
+        className={`tabular-nums truncate ${strong ? "font-semibold" : ""}`}
+      >
+        {children}
+      </dd>
     </div>
   );
 }

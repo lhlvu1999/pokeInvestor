@@ -166,11 +166,13 @@ export function HistoryTable({ rows }: { rows: HistoryRow[] }) {
           placeholder="Search by item name..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="min-w-[240px] flex-1 sm:flex-initial"
+          className="min-w-0 w-full sm:min-w-[240px] sm:w-auto sm:flex-initial"
         />
         <Select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}
+          className="flex-1 min-w-[140px] sm:flex-none"
+          aria-label="Type filter"
         >
           <option value="all">All types</option>
           <option value="buy">Buys only</option>
@@ -180,6 +182,8 @@ export function HistoryTable({ rows }: { rows: HistoryRow[] }) {
         <Select
           value={itemFilter}
           onChange={(e) => setItemFilter(e.target.value)}
+          className="flex-1 min-w-[140px] sm:flex-none sm:max-w-[240px]"
+          aria-label="Item filter"
         >
           <option value="all">All items</option>
           {itemOptions.map((it) => (
@@ -195,7 +199,45 @@ export function HistoryTable({ rows }: { rows: HistoryRow[] }) {
         </div>
       </div>
 
-      <Card className="overflow-x-auto">
+      <div className="flex items-center gap-2 sm:hidden">
+        <Select
+          value={sortKey}
+          onChange={(e) => {
+            const key = e.target.value as SortKey;
+            setSortKey(key);
+            setSortDir(NUMERIC_KEYS.has(key) ? "desc" : "asc");
+          }}
+          aria-label="Sort by"
+          className="flex-1"
+        >
+          <option value="date">Sort: Date</option>
+          <option value="item">Sort: Item</option>
+          <option value="amount">Sort: Total</option>
+          <option value="qty">Sort: Quantity</option>
+          <option value="type">Sort: Type</option>
+        </Select>
+        <button
+          type="button"
+          onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+          aria-label={sortDir === "asc" ? "Ascending" : "Descending"}
+          className="h-10 w-10 shrink-0 rounded-lg border border-zinc-300 dark:border-zinc-700 text-sm"
+        >
+          {sortDir === "asc" ? "▲" : "▼"}
+        </button>
+      </div>
+
+      <Card className="sm:hidden divide-y divide-zinc-200 dark:divide-zinc-800">
+        {filteredSorted.map((r) => (
+          <MobileRow key={r.id} row={r} />
+        ))}
+        {filteredSorted.length === 0 && (
+          <div className="px-4 py-8 text-center text-sm text-zinc-500">
+            No transactions match the current filters.
+          </div>
+        )}
+      </Card>
+
+      <Card className="hidden sm:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="border-b border-zinc-200 dark:border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
             <tr>
@@ -261,6 +303,64 @@ export function HistoryTable({ rows }: { rows: HistoryRow[] }) {
           </tbody>
         </table>
       </Card>
+    </div>
+  );
+}
+
+function typeLabel(row: HistoryRow): { text: string; className: string } {
+  const reason = row.type === "sell" ? displayExitReason(row.exitReason) : null;
+  const isExit = reason != null && reason !== "sold";
+  if (row.type === "buy")
+    return { text: "Buy", className: "text-emerald-600 dark:text-emerald-400" };
+  if (isExit)
+    return {
+      text: EXIT_REASON_LABELS[reason],
+      className: "text-amber-600 dark:text-amber-400",
+    };
+  return { text: "Sell", className: "text-rose-600 dark:text-rose-400" };
+}
+
+/** A transaction as a phone-sized card (the table needs ~900px). */
+function MobileRow({ row }: { row: HistoryRow }) {
+  const label = typeLabel(row);
+  return (
+    <div className="px-3 py-2.5 flex flex-col gap-1">
+      <div className="flex items-baseline justify-between gap-3">
+        <ItemLink
+          itemId={row.itemId}
+          className="font-medium leading-snug hover:underline min-w-0"
+        >
+          {row.itemName}
+        </ItemLink>
+        <span className="tabular-nums font-medium shrink-0">
+          <Money amount={row.finalValueCents} currency={row.currency} />
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+        <span>{new Date(row.occurredAt).toLocaleDateString()}</span>
+        <span aria-hidden="true">·</span>
+        <span className={label.className}>{label.text}</span>
+        <span aria-hidden="true">·</span>
+        <span className="tabular-nums">
+          {row.quantity} ×{" "}
+          <Money
+            amount={Math.round(row.finalValueCents / row.quantity)}
+            currency={row.currency}
+          />
+        </span>
+      </div>
+      {row.note && (
+        <div className="text-xs text-zinc-500 line-clamp-2">{row.note}</div>
+      )}
+      <div className="flex items-center justify-end gap-1 -mr-2 -mb-1">
+        <Link
+          href={`/transactions/${row.id}/edit`}
+          className="text-xs px-2 py-2 text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100"
+        >
+          Edit
+        </Link>
+        <DeleteTransactionButton id={row.id} />
+      </div>
     </div>
   );
 }

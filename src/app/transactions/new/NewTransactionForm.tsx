@@ -438,8 +438,14 @@ export function NewTransactionForm({
         </div>
       )}
 
-      <div className="flex items-center gap-2 justify-end">
-        <ButtonLink href={cancelHref} variant="secondary" className="order-1">
+      {/* Phones: Save on top at full width, the other two share a row below.
+          sm+: one row, Save on the right. */}
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
+        <ButtonLink
+          href={cancelHref}
+          variant="secondary"
+          className="order-3 sm:order-1"
+        >
           Cancel
         </ButtonLink>
         {(() => {
@@ -453,7 +459,7 @@ export function NewTransactionForm({
             <>
               <Button
                 type="submit"
-                className="order-3"
+                className="order-1 col-span-2 sm:order-3 sm:col-span-1"
                 disabled={pending || blocked}
                 onClick={() => {
                   submitMode.current = "done";

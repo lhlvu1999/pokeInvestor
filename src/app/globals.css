@@ -177,3 +177,13 @@ table {
     display: none !important;
   }
 }
+
+/* iOS Safari zooms the page when a focused field is under 16px. Keep fields
+   at 16px on phones so tapping one never changes the zoom level. */
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
