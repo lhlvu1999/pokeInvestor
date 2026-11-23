@@ -1,14 +1,17 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { createTransaction } from "@/lib/server/transactions";
+import { useToast } from "@/components/Toast";
+import { suggestedTotal } from "@/lib/calc/entry_hints";
+import { defaultsToZeroValue, type ExitReason } from "@/lib/calc/exit_reason";
+import { ExitReasonPicker } from "@/components/ExitReasonPicker";
 import {
   Button,
   ButtonLink,
   Checkbox,
   Field,
-  Select,
   Textarea,
   TextInput,
 } from "@/components/ui";
@@ -32,19 +35,35 @@ export function NewTransactionForm({
   items,
   itemCurrency,
   itemHeld,
+  itemMarket,
+  itemLastBuy,
   defaultItemId,
   defaultType,
+  defaultExit,
   defaultCurrency,
 }: {
   items: Option[];
   itemCurrency: Record<string, string>;
   itemHeld: Record<string, number>;
+  /** Latest market price per unit, by item id. */
+  itemMarket: Record<string, { priceMinor: number; currency: string }>;
+  /** Per-unit item cost of the most recent buy (excl. shipping), by item id. */
+  itemLastBuy: Record<string, number>;
   defaultItemId: string | null;
   defaultType: "buy" | "sell";
+  /** Pre-selected exit reason, from a "Gift / lost / opened" link. */
+  defaultExit: ExitReason;
   defaultCurrency: string;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, startTransition] = useTransition();
+  // Which submit button was pressed: "done" goes to the item page, "another"
+  // stays here and clears the form for the next entry.
+  const submitMode = useRef<"done" | "another">("done");
+  const [focusSignal, setFocusSignal] = useState(0);
+  const [qtyStr, setQtyStr] = useState("1");
+  const [noteStr, setNoteStr] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [type, setType] = useState<"buy" | "sell">(defaultType);
   // When invoked via "Log buy" / "Log sell" the URL has itemId — lock the
@@ -57,7 +76,11 @@ export function NewTransactionForm({
   );
   const [pickedCurrency, setPickedCurrency] = useState(defaultCurrency);
   const currency = lockedCurrency ?? pickedCurrency;
-  const [itemCostStr, setItemCostStr] = useState("");
+  const [exitReason, setExitReason] = useState<ExitReason>(defaultExit);
+  // A gift or loss brings in nothing, so start at 0 instead of an empty box.
+  const [itemCostStr, setItemCostStr] = useState(
+    defaultsToZeroValue(defaultExit) ? "0" : "",
+  );
   const [shippingStr, setShippingStr] = useState("");
   const [received, setReceived] = useState(true);
 
@@ -80,6 +103,18 @@ export function NewTransactionForm({
     }
   }, [itemCostStr, shippingStr, currency]);
 
+  // Per-unit hints. The cost field is a TOTAL, so each "use" button fills
+  // quantity × per-unit rather than the bare unit price.
+  const qty = Number(qtyStr);
+  const market = selectedItemId ? itemMarket[selectedItemId] : undefined;
+  const marketTotal =
+    market && market.currency === currency
+      ? suggestedTotal(market.priceMinor, qty)
+      : null;
+  const lastBuy = selectedItemId ? itemLastBuy[selectedItemId] : undefined;
+  const lastBuyTotal =
+    type === "buy" && lastBuy != null ? suggestedTotal(lastBuy, qty) : null;
+
   const selectedItemName = useMemo(
     () => items.find((it) => it.id === selectedItemId)?.name ?? "",
     [items, selectedItemId],
@@ -89,10 +124,20 @@ export function NewTransactionForm({
     : null;
   const cancelHref = itemLocked ? `/items/${defaultItemId}` : "/";
 
+  function pickExitReason(next: ExitReason) {
+    setExitReason(next);
+    if (defaultsToZeroValue(next)) setItemCostStr("0");
+    else if (itemCostStr.trim() === "0") setItemCostStr("");
+  }
+
+  const isExit = type === "sell" && exitReason !== "sold";
+
   function onSubmit(formData: FormData) {
     setError(null);
     const itemId = String(formData.get("itemId") ?? "");
     const quantity = Number(formData.get("quantity") ?? 0);
+    const mode = submitMode.current;
+    submitMode.current = "done";
     const occurredAtRaw = String(formData.get("occurredAt") ?? "");
 
     if (!totalPreview) {
@@ -114,12 +159,31 @@ export function NewTransactionForm({
         currency,
         occurredAt: new Date(occurredAtRaw),
         note: String(formData.get("note") ?? ""),
+        exitReason: type === "sell" ? exitReason : null,
       });
       if (!res.ok) {
         setError(res.error);
         return;
       }
-      router.push(`/items/${itemId}`);
+      if (mode === "done") {
+        router.push(`/items/${itemId}`);
+        router.refresh();
+        return;
+      }
+      // Add another: confirm, reset the per-entry fields, and put the cursor
+      // back in the item search. Type, currency, fulfillment and time carry
+      // over — a run of entries usually shares them.
+      toast.show({
+        kind: "success",
+        message: `Saved ${isExit ? exitReason : type} · ${quantity} × ${selectedItemName || "item"} · ${totalPreview.formatted}`,
+      });
+      if (!itemLocked) setSelectedItemId("");
+      setQtyStr("1");
+      setItemCostStr(defaultsToZeroValue(exitReason) ? "0" : "");
+      setShippingStr("");
+      setNoteStr("");
+      setFocusSignal((n) => n + 1);
+      // Held counts and "last bought" hints come from the server.
       router.refresh();
     });
   }
@@ -145,6 +209,7 @@ export function NewTransactionForm({
             name: it.name,
             currency: itemCurrency[it.id] ?? defaultCurrency,
             held: itemHeld[it.id] ?? 0,
+            marketMinor: itemMarket[it.id]?.priceMinor ?? null,
           }));
           return (
             <ItemPicker
@@ -152,6 +217,7 @@ export function NewTransactionForm({
               value={selectedItemId}
               onChange={setSelectedItemId}
               locked={itemLocked}
+              focusSignal={focusSignal}
             />
           );
         })()}
@@ -184,6 +250,12 @@ export function NewTransactionForm({
         </div>
       </Field>
 
+      {type === "sell" && (
+        <Field label="Why is it leaving?" htmlFor="exitReason">
+          <ExitReasonPicker value={exitReason} onChange={pickExitReason} />
+        </Field>
+      )}
+
       <div className="grid grid-cols-2 gap-4">
         <Field label="Quantity" htmlFor="quantity">
           <TextInput
@@ -193,7 +265,8 @@ export function NewTransactionForm({
             min={1}
             step={1}
             required
-            defaultValue={1}
+            value={qtyStr}
+            onChange={(e) => setQtyStr(e.target.value)}
           />
         </Field>
         <Field
@@ -217,7 +290,13 @@ export function NewTransactionForm({
 
       <div className="grid grid-cols-2 gap-4">
         <Field
-          label={type === "buy" ? "Item cost" : "Item value (net of fees)"}
+          label={
+            type === "buy"
+              ? "Item cost"
+              : isExit
+                ? "Value you kept (0 = write off)"
+                : "Item value (net of fees)"
+          }
           htmlFor="itemCost"
         >
           <TextInput
@@ -228,6 +307,42 @@ export function NewTransactionForm({
             onChange={(e) => setItemCostStr(e.target.value)}
             placeholder="0"
           />
+          {(marketTotal != null || lastBuyTotal != null) && (
+            <div className="mt-1.5 flex flex-col gap-1 text-[11px] text-zinc-500">
+              {marketTotal != null && market && (
+                <div>
+                  Market {formatAmount(market.priceMinor, currency)} each ·{" "}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setItemCostStr(
+                        minorToDecimalString(marketTotal, currency),
+                      )
+                    }
+                    className="underline hover:no-underline text-zinc-700 dark:text-zinc-300"
+                  >
+                    use {formatAmount(marketTotal, currency)}
+                  </button>
+                </div>
+              )}
+              {lastBuyTotal != null && lastBuy != null && (
+                <div>
+                  Last bought {formatAmount(lastBuy, currency)} each ·{" "}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setItemCostStr(
+                        minorToDecimalString(lastBuyTotal, currency),
+                      )
+                    }
+                    className="underline hover:no-underline text-zinc-700 dark:text-zinc-300"
+                  >
+                    use {formatAmount(lastBuyTotal, currency)}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <div className="text-[10px] text-zinc-500 mt-1">
             Tip: <code>5m</code> = 5,000,000 · <code>2.5k</code> = 2,500
           </div>
@@ -290,7 +405,9 @@ export function NewTransactionForm({
         label={
           type === "buy"
             ? "Note — why did you buy this?"
-            : "Note — why did you sell?"
+            : isExit
+              ? "Note — what happened?"
+              : "Note — why did you sell?"
         }
         htmlFor="note"
         hint="A line for your future self. Six months from now, this is the retrospective."
@@ -299,6 +416,8 @@ export function NewTransactionForm({
           id="note"
           name="note"
           rows={2}
+          value={noteStr}
+          onChange={(e) => setNoteStr(e.target.value)}
           placeholder={
             type === "buy"
               ? "e.g. Creator X said this is undervalued after the reprint"
@@ -320,20 +439,42 @@ export function NewTransactionForm({
       )}
 
       <div className="flex items-center gap-2 justify-end">
-        <ButtonLink href={cancelHref} variant="secondary">
+        <ButtonLink href={cancelHref} variant="secondary" className="order-1">
           Cancel
         </ButtonLink>
-        <Button
-          type="submit"
-          disabled={
-            pending ||
-            (type === "sell" &&
-              heldForSelected != null &&
-              heldForSelected === 0)
-          }
-        >
-          {pending ? "Saving..." : "Save transaction"}
-        </Button>
+        {(() => {
+          const blocked =
+            type === "sell" && heldForSelected != null && heldForSelected === 0;
+          // DOM order puts the primary button first, because Enter in a
+          // text field "clicks" the first submit button and that should be
+          // plain Save. `order-*` puts it last on screen, where people look
+          // for it.
+          return (
+            <>
+              <Button
+                type="submit"
+                className="order-3"
+                disabled={pending || blocked}
+                onClick={() => {
+                  submitMode.current = "done";
+                }}
+              >
+                {pending ? "Saving..." : "Save transaction"}
+              </Button>
+              <Button
+                type="submit"
+                variant="secondary"
+                className="order-2"
+                disabled={pending || blocked}
+                onClick={() => {
+                  submitMode.current = "another";
+                }}
+              >
+                Save & add another
+              </Button>
+            </>
+          );
+        })()}
       </div>
     </form>
   );

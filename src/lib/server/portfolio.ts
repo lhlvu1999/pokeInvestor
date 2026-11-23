@@ -1,15 +1,12 @@
 import { db } from "@/db/client";
-import { marketPrices, transactions } from "@/db/schema";
+import { items as itemsTable, marketPrices, transactions } from "@/db/schema";
 import {
   type ConvertedItemValues,
   summarizePortfolio,
   type PortfolioSummary,
 } from "@/lib/calc/portfolio";
-import {
-  groupByMonthCurrency,
-  replayItemEvents,
-  type CashflowBucket,
-} from "@/lib/calc/cashflow";
+import { computeCashflowLines } from "@/lib/calc/cashflow_lines";
+import type { WindowLine } from "@/lib/calc/cashflow_window";
 import {
   computePortfolioSnapshots,
   weeklySnapshotDates,
@@ -17,6 +14,7 @@ import {
 import { convertMinor, type CurrencyCode } from "@/lib/currency";
 import { getRate } from "@/lib/fx";
 import { listItemsWithValuations, type ItemWithValuation } from "./items";
+import { getCostMethod } from "./settings";
 
 export type DashboardData = {
   items: ItemWithValuation[];
@@ -33,15 +31,6 @@ export type FxNote = {
   rate: number;
   fetchedAt: Date;
   stale: boolean;
-};
-
-export type MonthlyCashflow = {
-  month: string; // "YYYY-MM"
-  spend: number;
-  revenue: number;
-  realized: number;
-  /** Shipping portion of `spend` for the month, in display currency. */
-  shipping: number;
 };
 
 export type TagRollup = {
@@ -205,17 +194,30 @@ export type CashflowFilter = {
   itemIdsFilter?: ReadonlySet<string>;
 };
 
+export type CashflowLines = {
+  /** Per-(month, item) activity in display currency, oldest first. */
+  lines: WindowLine[];
+  /** First / last month with any activity; null when there is none. */
+  bounds: { first: string; last: string } | null;
+};
+
 /**
- * Per-month cashflow (spend, revenue, realized profit), converted to
- * `displayCurrency`. Realized profit is computed via specific-lot + FIFO
- * replay per item, matching computeHoldings.
+ * Cashflow broken down per (month, item), converted to `displayCurrency`.
+ * The dashboard's cashflow explorer derives every figure it shows — bars,
+ * totals, top items — from these rows, so they always agree.
+ *
+ * Realized profit uses the same specific-lot + FIFO replay as
+ * computeHoldings.
  */
-export async function getMonthlyCashflow(
+export async function getCashflowLines(
   displayCurrency: CurrencyCode,
   filter: CashflowFilter = {},
-): Promise<MonthlyCashflow[]> {
-  const txs = await db.select().from(transactions);
-  if (txs.length === 0) return [];
+): Promise<CashflowLines> {
+  const [txs, itemRows] = await Promise.all([
+    db.select().from(transactions),
+    db.select({ id: itemsTable.id, name: itemsTable.name }).from(itemsTable),
+  ]);
+  if (txs.length === 0) return { lines: [], bounds: null };
 
   const byItem = new Map<string, typeof txs>();
   for (const t of txs) {
@@ -224,17 +226,13 @@ export async function getMonthlyCashflow(
     list.push(t);
     byItem.set(t.itemId, list);
   }
+  const nameById = new Map(itemRows.map((r) => [r.id, r.name]));
+  const native = computeCashflowLines(byItem, nameById, await getCostMethod());
 
-  const allEvents: CashflowBucket[] = [];
-  for (const list of byItem.values()) {
-    allEvents.push(...replayItemEvents(list));
-  }
-  const grouped = groupByMonthCurrency(allEvents);
-
-  // Resolve FX rates for every distinct (from, to) pair we'll need.
+  // Resolve FX rates for every distinct source currency.
   const fromCurrencies = new Set<string>();
-  for (const g of grouped) {
-    if (g.currency !== displayCurrency) fromCurrencies.add(g.currency);
+  for (const l of native) {
+    if (l.currency !== displayCurrency) fromCurrencies.add(l.currency);
   }
   const rateMap = new Map<string, number>();
   const rateResults = await Promise.all(
@@ -251,42 +249,56 @@ export async function getMonthlyCashflow(
     if (r.ok) rateMap.set(r.from, r.rate);
   }
 
-  const monthly = new Map<string, MonthlyCashflow>();
-  for (const g of grouped) {
-    let spend = g.spend;
-    let revenue = g.revenue;
-    let realized = g.realized;
-    let shipping = g.shipping;
-    if (g.currency !== displayCurrency) {
-      const rate = rateMap.get(g.currency);
+  // An item can span currencies; fold those rows together per (month, item).
+  const merged = new Map<string, WindowLine>();
+  for (const l of native) {
+    let { spend, revenue, realized, shipping } = l;
+    if (l.currency !== displayCurrency) {
+      const rate = rateMap.get(l.currency);
       if (rate == null) continue;
       const conv = (m: number) =>
-        convertMinor(m, g.currency, displayCurrency, rate);
+        convertMinor(m, l.currency, displayCurrency, rate);
       spend = conv(spend);
       revenue = conv(revenue);
       realized = conv(realized);
       shipping = conv(shipping);
     }
-    const cur = monthly.get(g.month);
+    const key = `${l.month}|${l.itemId}`;
+    const cur = merged.get(key);
     if (cur) {
       cur.spend += spend;
       cur.revenue += revenue;
       cur.realized += realized;
       cur.shipping += shipping;
+      cur.buys += l.buys;
+      cur.sells += l.sells;
+      cur.unitsBought += l.unitsBought;
+      cur.unitsSold += l.unitsSold;
     } else {
-      monthly.set(g.month, {
-        month: g.month,
+      merged.set(key, {
+        month: l.month,
+        itemId: l.itemId,
+        itemName: l.itemName,
         spend,
         revenue,
         realized,
         shipping,
+        buys: l.buys,
+        sells: l.sells,
+        unitsBought: l.unitsBought,
+        unitsSold: l.unitsSold,
       });
     }
   }
 
-  return Array.from(monthly.values()).sort((a, b) =>
+  const lines = Array.from(merged.values()).sort((a, b) =>
     a.month.localeCompare(b.month),
   );
+  if (lines.length === 0) return { lines, bounds: null };
+  return {
+    lines,
+    bounds: { first: lines[0].month, last: lines[lines.length - 1].month },
+  };
 }
 
 export type PortfolioValuePoint = {
@@ -344,6 +356,7 @@ export async function getPortfolioValueSeries(
     txsByItem,
     pricesByItem,
     itemCurrencyById,
+    await getCostMethod(),
   );
 
   // Resolve FX rates for every non-display currency appearing anywhere.

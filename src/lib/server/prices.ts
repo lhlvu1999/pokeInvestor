@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
 import {
@@ -320,6 +320,16 @@ export async function refreshPriceFromEbay(
     currency: targetCurrency,
     source: "ebay",
   });
+
+  // Fill in a missing picture from the listings we just priced from. Only
+  // when the price was accepted (so a low-confidence, possibly mismatched
+  // search can't supply the photo) and never over one the user set.
+  if (!item.imageUrl && result.imageUrl) {
+    await db
+      .update(items)
+      .set({ imageUrl: result.imageUrl })
+      .where(and(eq(items.id, itemId), isNull(items.imageUrl)));
+  }
 
   revalidatePath("/");
   revalidatePath("/items");

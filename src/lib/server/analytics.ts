@@ -15,13 +15,20 @@ import {
 } from "@/lib/calc/analytics";
 import { convertMinor, type CurrencyCode } from "@/lib/currency";
 import { getRate } from "@/lib/fx";
+import { isSale } from "@/lib/calc/exit_reason";
+import { getCostMethod } from "./settings";
 
 /* ------------------------------------------------------------------ */
 /* Public types                                                        */
 /* ------------------------------------------------------------------ */
 
 export type HeadlineStats = {
+  /** Realized profit including write-offs (gifted / lost / opened). */
   realizedTotal: number;
+  /** Part of realizedTotal from non-sale exits (usually negative). */
+  writeOffTotal: number;
+  /** Units that left as gifts / losses / opened. */
+  writeOffUnits: number;
   sellsCount: number;
   winRatePct: number; // 0..100
   avgMarginPct: number | null;
@@ -138,9 +145,10 @@ const SAME_ITEM_MAX_ITEMS = 20;
 export async function getAnalyticsData(
   displayCurrency: CurrencyCode,
 ): Promise<AnalyticsData> {
-  const [allItems, allTxs] = await Promise.all([
+  const [allItems, allTxs, method] = await Promise.all([
     db.select().from(items).orderBy(asc(items.name)),
     db.select().from(transactions),
+    getCostMethod(),
   ]);
 
   // Group transactions by item.
@@ -155,6 +163,8 @@ export async function getAnalyticsData(
   type ItemAnalytics = {
     item: (typeof allItems)[number];
     sells: SellAnalytic[];
+    /** Gifted / lost / opened — in realized profit, not in sale stats. */
+    exits: SellAnalytic[];
     heldLots: HeldLot[];
     pendingQty: number;
   };
@@ -162,22 +172,24 @@ export async function getAnalyticsData(
   const now = new Date();
   for (const it of allItems) {
     const list = byItem.get(it.id) ?? [];
-    const { sells, remaining } = replayForAnalytics(list);
+    const { sells: allSells, remaining } = replayForAnalytics(list, method);
+    // Win rate, margins and days-to-sell describe SALES. Giving a box away
+    // is not a bad sale, so exits are tallied apart (and still counted in
+    // the realized total below).
+    const sells = allSells.filter((s) => isSale(s.exitReason));
+    const exits = allSells.filter((s) => !isSale(s.exitReason));
     const heldLots: HeldLot[] = remaining.map((r) => ({
       itemId: it.id,
       buyTxId: r.buyTxId,
       buyDate: r.buyDate,
       qty: r.qty,
       costCents: r.cost,
-      daysHeld: Math.max(
-        0,
-        (now.getTime() - r.buyDate.getTime()) / MS_PER_DAY,
-      ),
+      daysHeld: Math.max(0, (now.getTime() - r.buyDate.getTime()) / MS_PER_DAY),
     }));
     const pendingQty = list
       .filter((t) => t.type === "buy" && t.status === "pending")
       .reduce((s, t) => s + t.quantity, 0);
-    perItem.push({ item: it, sells, heldLots, pendingQty });
+    perItem.push({ item: it, sells, exits, heldLots, pendingQty });
   }
 
   // Resolve FX rates for every distinct non-display currency the data uses.
@@ -213,16 +225,15 @@ export async function getAnalyticsData(
   const allSlowMovers: SlowMover[] = [];
 
   for (const ia of perItem) {
-    const currency = (byItem.get(ia.item.id) ?? [])[0]?.currency ?? displayCurrency;
+    const currency =
+      (byItem.get(ia.item.id) ?? [])[0]?.currency ?? displayCurrency;
     for (const s of ia.sells) {
       const dispRealized = toDisplay(s.realizedCents, currency);
       if (dispRealized == null) continue;
       allLotResults.push({
         itemId: ia.item.id,
         itemName: ia.item.name,
-        buyDate: new Date(
-          s.sellDate.getTime() - s.daysHeldAvg * MS_PER_DAY,
-        ),
+        buyDate: new Date(s.sellDate.getTime() - s.daysHeldAvg * MS_PER_DAY),
         sellDate: s.sellDate,
         daysHeld: s.daysHeldAvg,
         buyCents: s.consumedCostCents,
@@ -267,11 +278,24 @@ export async function getAnalyticsData(
     daysSum += r.daysHeld;
     daysCount += 1;
   }
+  let writeOffTotal = 0;
+  let writeOffUnits = 0;
+  for (const ia of perItem) {
+    const currency =
+      (byItem.get(ia.item.id) ?? [])[0]?.currency ?? displayCurrency;
+    for (const e of ia.exits) {
+      const disp = toDisplay(e.realizedCents, currency);
+      if (disp == null) continue;
+      writeOffTotal += disp;
+      writeOffUnits += e.quantity;
+    }
+  }
   let capitalTiedUp = 0;
   let itemsInStock = 0;
   let itemsOnTheWay = 0;
   for (const ia of perItem) {
-    const currency = (byItem.get(ia.item.id) ?? [])[0]?.currency ?? displayCurrency;
+    const currency =
+      (byItem.get(ia.item.id) ?? [])[0]?.currency ?? displayCurrency;
     const inv = ia.heldLots.reduce((s, h) => s + h.costCents, 0);
     if (inv > 0) {
       const disp = toDisplay(inv, currency);
@@ -285,12 +309,12 @@ export async function getAnalyticsData(
   }
 
   const headline: HeadlineStats = {
-    realizedTotal,
+    realizedTotal: realizedTotal + writeOffTotal,
+    writeOffTotal,
+    writeOffUnits,
     sellsCount: allLotResults.length,
     winRatePct:
-      allLotResults.length === 0
-        ? 0
-        : (winsCount / allLotResults.length) * 100,
+      allLotResults.length === 0 ? 0 : (winsCount / allLotResults.length) * 100,
     avgMarginPct: marginCount === 0 ? null : marginSum / marginCount,
     avgDaysHeld: daysCount === 0 ? null : daysSum / daysCount,
     capitalTiedUp,
@@ -341,7 +365,8 @@ export async function getAnalyticsData(
       const dispCost = toDisplay(s.consumedCostCents, currency);
       const dispSell = toDisplay(s.sellValueCents, currency);
       const dispRealized = toDisplay(s.realizedCents, currency);
-      if (dispCost == null || dispSell == null || dispRealized == null) continue;
+      if (dispCost == null || dispSell == null || dispRealized == null)
+        continue;
       let agg = itemAggs.get(ia.item.id);
       if (!agg) {
         agg = {
@@ -387,9 +412,7 @@ export async function getAnalyticsData(
       avgMarginPct:
         a.totalCost === 0 ? null : (a.totalRealized / a.totalCost) * 100,
       avgDaysHeld:
-        a.daysWeightedQty === 0
-          ? null
-          : a.daysWeightedSum / a.daysWeightedQty,
+        a.daysWeightedQty === 0 ? null : a.daysWeightedSum / a.daysWeightedQty,
       firstSellDate: new Date(a.firstSell),
       lastSellDate: new Date(a.lastSell),
     }))
@@ -438,7 +461,8 @@ export async function getAnalyticsData(
     return b;
   }
   for (const ia of perItem) {
-    const currency = (byItem.get(ia.item.id) ?? [])[0]?.currency ?? displayCurrency;
+    const currency =
+      (byItem.get(ia.item.id) ?? [])[0]?.currency ?? displayCurrency;
     for (const tag of ia.item.tags) {
       const b = ensureTag(tag);
       b.items.add(ia.item.id);
@@ -479,7 +503,8 @@ export async function getAnalyticsData(
   for (const ia of perItem) {
     const totalLots = ia.sells.length + ia.heldLots.length;
     if (totalLots < SAME_ITEM_MIN_LOTS) continue;
-    const currency = (byItem.get(ia.item.id) ?? [])[0]?.currency ?? displayCurrency;
+    const currency =
+      (byItem.get(ia.item.id) ?? [])[0]?.currency ?? displayCurrency;
     const lots: SameItemRow["lots"] = [];
     let idx = 1;
     for (const s of ia.sells) {

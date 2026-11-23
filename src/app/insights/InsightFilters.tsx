@@ -1,7 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Select, TextInput } from "@/components/ui";
 import {
   DEFAULT_TIME_WINDOW_DAYS,
@@ -32,6 +32,7 @@ export function InsightFilters({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const currentParams = useSearchParams();
   const [, startTransition] = useTransition();
 
   function update(next: Partial<FilterState>) {
@@ -45,6 +46,11 @@ export function InsightFilters({
       params.set("channel", merged.channelIds.join(","));
     }
     if (merged.q.trim().length > 0) params.set("q", merged.q.trim());
+    // Not a filter, but it belongs to the same page: keep it across changes.
+    for (const key of ["horizon", "move"]) {
+      const v = currentParams.get(key);
+      if (v) params.set(key, v);
+    }
     const qs = params.toString();
     startTransition(() => {
       router.replace(qs ? `${pathname}?${qs}` : pathname);
@@ -83,7 +89,9 @@ export function InsightFilters({
         </label>
 
         <label className="flex items-center gap-2 text-xs">
-          <span className="text-zinc-500 uppercase tracking-wider">Channel</span>
+          <span className="text-zinc-500 uppercase tracking-wider">
+            Channel
+          </span>
           <Select
             value={initial.channelIds[0] ?? ""}
             onChange={(e) =>

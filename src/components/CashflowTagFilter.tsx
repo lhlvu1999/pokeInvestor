@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 const DEFAULT_VISIBLE = 8;
@@ -10,6 +11,23 @@ export type CashflowTagChip = {
   href: string;
   active: boolean;
 };
+
+/**
+ * The cashflow range lives in the URL but is changed client-side, so the
+ * server-rendered hrefs below don't know about it. Re-attach the current
+ * range when a chip is clicked so filtering by tag doesn't reset the window.
+ */
+const RANGE_PARAMS = ["cf", "cffrom", "cfto"] as const;
+
+function withCurrentRange(href: string): string {
+  const current = new URLSearchParams(window.location.search);
+  const target = new URL(href, window.location.origin);
+  for (const k of RANGE_PARAMS) {
+    const v = current.get(k);
+    if (v != null) target.searchParams.set(k, v);
+  }
+  return `${target.pathname}${target.search}`;
+}
 
 export function CashflowTagFilter({
   chips,
@@ -24,6 +42,15 @@ export function CashflowTagFilter({
   clearHref: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const router = useRouter();
+  const go = (e: React.MouseEvent, href: string) => {
+    // Let modified clicks (new tab etc.) use the plain href.
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+      return;
+    }
+    e.preventDefault();
+    router.push(withCurrentRange(href), { scroll: false });
+  };
 
   if (chips.length === 0) return null;
 
@@ -42,6 +69,7 @@ export function CashflowTagFilter({
         <Link
           key={c.tag}
           href={c.href}
+          onClick={(e) => go(e, c.href)}
           className={`text-[10px] rounded-full px-2 py-0.5 border transition-colors ${
             c.active
               ? "border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900"
@@ -72,6 +100,7 @@ export function CashflowTagFilter({
       {activeCount > 0 && (
         <Link
           href={clearHref}
+          onClick={(e) => go(e, clearHref)}
           className="text-[10px] text-zinc-500 hover:underline ml-1"
         >
           clear

@@ -5,6 +5,7 @@
  */
 
 import type { Transaction } from "@/db/schema";
+import { consumeQueue, DEFAULT_COST_METHOD, type CostMethod } from "./holdings";
 
 export const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -26,6 +27,8 @@ export type SellAnalytic = {
   daysHeldAvg: number;
   /** Quantity sold. */
   quantity: number;
+  /** Stored exit reason: null for a normal sale (see calc/exit_reason). */
+  exitReason: string | null;
 };
 
 export type HeldLot = {
@@ -50,7 +53,7 @@ type TxInput = Pick<
   | "currency"
   | "lotId"
   | "status"
->;
+> & { exitReason?: string | null };
 
 type QueueEntry = {
   buyTxId: string;
@@ -70,6 +73,7 @@ type QueueEntry = {
  */
 export function replayForAnalytics(
   txs: ReadonlyArray<TxInput>,
+  method: CostMethod = DEFAULT_COST_METHOD,
 ): { sells: SellAnalytic[]; remaining: QueueEntry[] } {
   if (txs.length === 0) return { sells: [], remaining: [] };
 
@@ -92,39 +96,32 @@ export function replayForAnalytics(
       });
       continue;
     }
-    // Sell — consume from the queue (lot-specific or FIFO).
-    let toSell = tx.quantity;
-    let consumedCost = 0;
-    // Weighted-days tracker.
+    // Sell — consume from the queue per the cost method. Holding period is
+    // measured over the units removed oldest-first, under either method.
     let weightedDaysSum = 0;
     let weightedQty = 0;
-
-    for (const entry of queue) {
-      if (toSell === 0) break;
-      if (entry.qty === 0) continue;
-      if (tx.lotId != null && entry.lotId !== tx.lotId) continue;
-      const take = Math.min(toSell, entry.qty);
-      const cost =
-        take === entry.qty
-          ? entry.cost
-          : Math.round((entry.cost * take) / entry.qty);
-      consumedCost += cost;
-      const days = Math.max(
-        0,
-        (tx.occurredAt.getTime() - entry.buyDate.getTime()) / MS_PER_DAY,
-      );
-      weightedDaysSum += days * take;
-      weightedQty += take;
-      entry.qty -= take;
-      entry.cost -= cost;
-      toSell -= take;
-    }
+    const { consumed: consumedCost } = consumeQueue(
+      queue,
+      tx.quantity,
+      tx.lotId,
+      method,
+      (entry, take) => {
+        const days = Math.max(
+          0,
+          (tx.occurredAt.getTime() - entry.buyDate.getTime()) / MS_PER_DAY,
+        );
+        weightedDaysSum += days * take;
+        weightedQty += take;
+      },
+    );
     // If the sell can't be fully satisfied here we simply emit what we can —
     // computeHoldings's stricter validation is the source of truth for
     // rejecting bad timelines. Analytics is best-effort.
 
     const marginPct =
-      consumedCost === 0 ? null : ((tx.finalValueCents - consumedCost) / consumedCost) * 100;
+      consumedCost === 0
+        ? null
+        : ((tx.finalValueCents - consumedCost) / consumedCost) * 100;
     const daysHeldAvg = weightedQty > 0 ? weightedDaysSum / weightedQty : 0;
 
     sells.push({
@@ -136,6 +133,7 @@ export function replayForAnalytics(
       marginPct,
       daysHeldAvg,
       quantity: tx.quantity,
+      exitReason: tx.exitReason ?? null,
     });
   }
 
@@ -183,8 +181,23 @@ export function makeHistogram(
   return buckets;
 }
 
-export const DAYS_HELD_EDGES = [0, 7, 30, 90, 180, 365, Number.POSITIVE_INFINITY];
-export const DAYS_HELD_LABELS = ["0–7d", "7–30d", "30–90d", "90–180d", "180–365d", "365d+"];
+export const DAYS_HELD_EDGES = [
+  0,
+  7,
+  30,
+  90,
+  180,
+  365,
+  Number.POSITIVE_INFINITY,
+];
+export const DAYS_HELD_LABELS = [
+  "0–7d",
+  "7–30d",
+  "30–90d",
+  "90–180d",
+  "180–365d",
+  "365d+",
+];
 
 export const MARGIN_PCT_EDGES = [
   Number.NEGATIVE_INFINITY,

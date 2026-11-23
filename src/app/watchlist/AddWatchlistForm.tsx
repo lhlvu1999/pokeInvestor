@@ -159,7 +159,7 @@ export function AddWatchlistForm({
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <div>
+        <div className="min-w-0">
           <label className="text-[11px] uppercase tracking-wider text-zinc-500">
             Target buy price (optional)
           </label>
@@ -175,7 +175,7 @@ export function AddWatchlistForm({
             Shorthand: <code>5m</code>, <code>2.5k</code>
           </div>
         </div>
-        <div>
+        <div className="min-w-0">
           <label className="text-[11px] uppercase tracking-wider text-zinc-500">
             Currency
           </label>
@@ -184,7 +184,9 @@ export function AddWatchlistForm({
             name="currency"
             value={currency}
             onChange={(e) => setCurrency(e.target.value)}
-            className="mt-1"
+            // w-full: a bare <select> sizes to its longest option, which here
+            // is wider than its column and spills out of the card.
+            className="mt-1 w-full min-w-0"
           />
         </div>
       </div>

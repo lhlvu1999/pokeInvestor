@@ -115,3 +115,65 @@ table {
   background: var(--border-strong);
   border-radius: 4px;
 }
+
+/* Item drawer: slides in from the right, backdrop fades in. Skipped for
+   people who ask the OS for reduced motion. */
+@keyframes drawer-in {
+  from {
+    transform: translateX(2rem);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes drawer-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.drawer-in {
+  animation: drawer-in 180ms ease-out;
+}
+.drawer-fade {
+  animation: drawer-fade 180ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer-in,
+  .drawer-fade {
+    animation: none;
+  }
+}
+
+/* Buyer sheet: when printing (or saving as PDF), show only the white sheet
+   and drop the app chrome and the on-screen buttons. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+  .print-overlay {
+    position: static !important;
+    overflow: visible !important;
+    background: none !important;
+    padding: 0 !important;
+  }
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: none;
+    box-shadow: none !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

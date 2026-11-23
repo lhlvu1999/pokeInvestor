@@ -35,6 +35,8 @@ transactions
   occurred_at timestamptz,
   lot_id uuid null,       -- specific-lot pair for imports; null for manual
   shipping_cents integer null,
+  exit_reason text null,  -- sells only: NULL = normal sale, else 'gifted' | 'lost' | 'opened'
+                          -- (write-offs: they count in realized profit, not as sales)
   note text                -- user's journal entry, "why did I buy this?"
 
 market_prices
@@ -83,10 +85,12 @@ watchlist_items
   id uuid, name text, item_id uuid null → items,  -- optional link
   target_buy_price_cents integer null, currency varchar(3),
   note text null,
-  added_at timestamptz, hit_at timestamptz null
-  -- Active entries have hit_at IS NULL. When the user buys the product
-  -- or a market price crosses the target, hit_at is set (row kept for
-  -- history). Match creator mentions by item_id when linked, else by
+  added_at timestamptz, hit_at timestamptz null,
+  target_alerted_at timestamptz null  -- set when the daily check alerted that the linked item's price reached the target; cleared if it rises back above
+  -- Active entries have hit_at IS NULL. When the user buys the product,
+  -- hit_at is set (row kept for history). A market price reaching the
+  -- target only sets target_alerted_at (a notification, not a purchase).
+  -- Match creator mentions by item_id when linked, else by
   -- lower(raw_name) = lower(w.name).
 
 ── useful patterns ────────────────────────────────────────────────────────

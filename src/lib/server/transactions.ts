@@ -1,10 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { desc, eq, lt } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
-import { transactions, type Transaction } from "@/db/schema";
+import {
+  deletedTransactions,
+  items,
+  transactions,
+  type Transaction,
+} from "@/db/schema";
 import {
   InsufficientHoldingsError,
   MixedCurrencyError,
@@ -15,6 +20,8 @@ import {
   parseAmountLoose,
   DEFAULT_TRANSACTION_CURRENCY,
 } from "@/lib/currency";
+import { storedExitReason } from "@/lib/calc/exit_reason";
+import { daysLeft, purgeBefore } from "@/lib/calc/recently_deleted";
 import type { ActionResult } from "./items";
 
 const transactionInputSchema = z.object({
@@ -32,6 +39,8 @@ const transactionInputSchema = z.object({
   currency: z.string().length(3),
   occurredAt: z.coerce.date(),
   note: z.string().trim().max(2000).optional().or(z.literal("")),
+  /** Sells only: 'gifted' | 'lost' | 'opened'. Anything else = a sale. */
+  exitReason: z.string().optional().nullable(),
 });
 
 export type CreateTransactionInput = z.input<typeof transactionInputSchema>;
@@ -134,11 +143,13 @@ export async function createTransaction(
           ? parsed.data.note
           : null,
       status,
+      exitReason: storedExitReason(parsed.data.type, parsed.data.exitReason),
     })
     .returning();
 
   revalidatePath("/");
   revalidatePath("/items");
+  revalidatePath("/history");
   revalidatePath(`/items/${parsed.data.itemId}`);
   return { ok: true, data: created };
 }
@@ -155,6 +166,7 @@ const updateInputSchema = z.object({
   status: z.enum(["pending", "received"]).optional(),
   occurredAt: z.coerce.date(),
   note: z.string().trim().max(2000).optional().or(z.literal("")),
+  exitReason: z.string().optional().nullable(),
 });
 
 export type UpdateTransactionInput = z.input<typeof updateInputSchema>;
@@ -262,6 +274,7 @@ export async function updateTransaction(
       shippingCents,
       occurredAt: parsed.data.occurredAt,
       status,
+      exitReason: storedExitReason(parsed.data.type, parsed.data.exitReason),
       note:
         parsed.data.note && parsed.data.note.length > 0
           ? parsed.data.note
@@ -306,9 +319,21 @@ export async function deleteTransaction(
     throw err;
   }
 
-  await db.delete(transactions).where(eq(transactions.id, id));
+  // Keep a copy for "Recently deleted" in the same database transaction, so
+  // a row is never gone without a way back (nor archived but still live).
+  await db.transaction(async (dbtx) => {
+    await dbtx
+      .insert(deletedTransactions)
+      .values({ id: tx.id, itemId: tx.itemId, snapshot: tx })
+      .onConflictDoUpdate({
+        target: deletedTransactions.id,
+        set: { snapshot: tx, deletedAt: new Date() },
+      });
+    await dbtx.delete(transactions).where(eq(transactions.id, id));
+  });
   revalidatePath("/");
   revalidatePath("/items");
+  revalidatePath("/history");
   revalidatePath(`/items/${tx.itemId}`);
   return { ok: true, data: tx };
 }
@@ -390,15 +415,61 @@ export async function createTransactionsBulk(
   return { ok: true, data: result };
 }
 
-/** Re-insert a previously deleted transaction. Called by the "Undo"
- * toast handler shortly after `deleteTransaction`. The row is a strict
- * clone including the original id, so market_prices FKs (which
- * reference items, not transactions) stay valid. */
-export async function restoreTransaction(
+/**
+ * Put a transaction back. The history is replayed with it included first, so
+ * a restore can never leave an item with an impossible timeline (for example
+ * restoring a buy whose currency no longer matches, or a sell with no stock
+ * left to cover it). The archive entry is removed in the same step.
+ */
+async function reinsertTransaction(
   tx: Transaction,
 ): Promise<ActionResult<Transaction>> {
+  const [item] = await db
+    .select({ id: items.id })
+    .from(items)
+    .where(eq(items.id, tx.itemId))
+    .limit(1);
+  if (!item) {
+    return {
+      ok: false,
+      error: "The item for this transaction no longer exists.",
+    };
+  }
+  const [already] = await db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(eq(transactions.id, tx.id))
+    .limit(1);
+  if (already) {
+    await db
+      .delete(deletedTransactions)
+      .where(eq(deletedTransactions.id, tx.id));
+    return { ok: true, data: tx };
+  }
+
+  const siblings = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.itemId, tx.itemId));
   try {
-    await db.insert(transactions).values(tx);
+    computeHoldings([...siblings, tx]);
+  } catch (err) {
+    if (
+      err instanceof InsufficientHoldingsError ||
+      err instanceof MixedCurrencyError
+    ) {
+      return { ok: false, error: `Could not restore: ${err.message}` };
+    }
+    throw err;
+  }
+
+  try {
+    await db.transaction(async (dbtx) => {
+      await dbtx.insert(transactions).values(tx);
+      await dbtx
+        .delete(deletedTransactions)
+        .where(eq(deletedTransactions.id, tx.id));
+    });
   } catch (err) {
     return {
       ok: false,
@@ -413,6 +484,126 @@ export async function restoreTransaction(
   revalidatePath("/items");
   revalidatePath(`/items/${tx.itemId}`);
   return { ok: true, data: tx };
+}
+
+/** Re-insert a transaction right after `deleteTransaction` (Undo toast).
+ * A strict clone including the original id. */
+export async function restoreTransaction(
+  tx: Transaction,
+): Promise<ActionResult<Transaction>> {
+  return reinsertTransaction({
+    ...tx,
+    occurredAt: new Date(tx.occurredAt),
+    createdAt: new Date(tx.createdAt),
+  });
+}
+
+export type DeletedTransactionRow = {
+  id: string;
+  itemId: string;
+  itemName: string;
+  type: "buy" | "sell";
+  quantity: number;
+  finalValueCents: number;
+  currency: string;
+  /** ISO strings so the rows cross to the client as plain JSON. */
+  occurredAt: string;
+  deletedAt: string;
+  exitReason: string | null;
+  note: string | null;
+  daysLeft: number;
+};
+
+const snapshotSchema = z.object({
+  id: z.string().uuid(),
+  itemId: z.string().uuid(),
+  type: z.enum(["buy", "sell"]),
+  quantity: z.number().int(),
+  finalValueCents: z.number(),
+  shippingCents: z.number().nullable(),
+  currency: z.string(),
+  occurredAt: z.coerce.date(),
+  note: z.string().nullable(),
+  lotId: z.string().nullable(),
+  status: z.enum(["pending", "received"]),
+  // Older snapshots predate the column.
+  exitReason: z.string().nullable().optional(),
+  createdAt: z.coerce.date(),
+});
+
+/** Newest first. Expired entries are purged here, so no cron is needed. */
+export async function listDeletedTransactions(): Promise<
+  DeletedTransactionRow[]
+> {
+  const now = new Date();
+  await db
+    .delete(deletedTransactions)
+    .where(lt(deletedTransactions.deletedAt, purgeBefore(now)));
+
+  const rows = await db
+    .select({
+      id: deletedTransactions.id,
+      snapshot: deletedTransactions.snapshot,
+      deletedAt: deletedTransactions.deletedAt,
+      itemName: items.name,
+    })
+    .from(deletedTransactions)
+    .innerJoin(items, eq(deletedTransactions.itemId, items.id))
+    .orderBy(desc(deletedTransactions.deletedAt));
+
+  const out: DeletedTransactionRow[] = [];
+  for (const r of rows) {
+    const snap = snapshotSchema.safeParse(r.snapshot);
+    if (!snap.success) continue;
+    const s = snap.data;
+    out.push({
+      id: s.id,
+      itemId: s.itemId,
+      itemName: r.itemName,
+      type: s.type,
+      quantity: s.quantity,
+      finalValueCents: s.finalValueCents,
+      currency: s.currency,
+      occurredAt: s.occurredAt.toISOString(),
+      deletedAt: r.deletedAt.toISOString(),
+      exitReason: s.exitReason ?? null,
+      note: s.note,
+      daysLeft: daysLeft(r.deletedAt, now),
+    });
+  }
+  return out;
+}
+
+/** Restore one entry from "Recently deleted". */
+export async function restoreDeletedTransaction(
+  id: string,
+): Promise<ActionResult<Transaction>> {
+  const [row] = await db
+    .select()
+    .from(deletedTransactions)
+    .where(eq(deletedTransactions.id, id))
+    .limit(1);
+  if (!row) return { ok: false, error: "That entry is no longer available." };
+  const snap = snapshotSchema.safeParse(row.snapshot);
+  if (!snap.success) {
+    return {
+      ok: false,
+      error: "This entry is damaged and cannot be restored.",
+    };
+  }
+  return reinsertTransaction({
+    ...snap.data,
+    exitReason: snap.data.exitReason ?? null,
+  });
+}
+
+/** Remove an entry from "Recently deleted" for good. */
+export async function purgeDeletedTransaction(
+  id: string,
+): Promise<ActionResult<{ id: string }>> {
+  await db.delete(deletedTransactions).where(eq(deletedTransactions.id, id));
+  revalidatePath("/history");
+  return { ok: true, data: { id } };
 }
 
 /**

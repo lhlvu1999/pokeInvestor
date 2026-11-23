@@ -243,6 +243,16 @@ export async function syncSchema(): Promise<ActionResult<SyncSchemaResult>> {
     `CREATE INDEX IF NOT EXISTS transactions_lot_idx ON transactions USING btree (lot_id)`,
     `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS status transaction_status NOT NULL DEFAULT 'received'`,
     `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS shipping_cents bigint`,
+    `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS exit_reason text`,
+
+    // Deleted-transaction archive ("Recently deleted" on History).
+    `CREATE TABLE IF NOT EXISTS deleted_transactions (
+       id uuid PRIMARY KEY,
+       item_id uuid NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+       snapshot jsonb NOT NULL,
+       deleted_at timestamptz NOT NULL DEFAULT now()
+     )`,
+    `CREATE INDEX IF NOT EXISTS deleted_transactions_deleted_at_idx ON deleted_transactions USING btree (deleted_at)`,
 
     // ── YouTube-insights pipeline ───────────────────────────────────────
     // Enums first; ENUM types can't run CREATE TYPE IF NOT EXISTS pre-PG10
@@ -360,8 +370,11 @@ export async function syncSchema(): Promise<ActionResult<SyncSchemaResult>> {
        currency varchar(3) NOT NULL,
        note text,
        added_at timestamptz NOT NULL DEFAULT now(),
-       hit_at timestamptz
+       hit_at timestamptz,
+       target_alerted_at timestamptz
      )`,
+    // Added after the table first shipped, so existing installs need it too.
+    `ALTER TABLE watchlist_items ADD COLUMN IF NOT EXISTS target_alerted_at timestamptz`,
     `CREATE INDEX IF NOT EXISTS watchlist_items_item_idx ON watchlist_items (item_id)`,
     `CREATE INDEX IF NOT EXISTS watchlist_items_hit_idx ON watchlist_items (hit_at)`,
   ];

@@ -9,10 +9,13 @@ export function DeleteItemButton({
   id,
   name,
   txCount,
+  variant = "button",
 }: {
   id: string;
   name: string;
   txCount: number;
+  /** "menu" renders as a full-width row for use inside a MoreMenu. */
+  variant?: "button" | "menu";
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -59,9 +62,14 @@ export function DeleteItemButton({
   return (
     <button
       type="button"
+      role={variant === "menu" ? "menuitem" : undefined}
       onClick={handleClick}
       disabled={pending}
-      className="inline-flex items-center justify-center gap-2 rounded-md px-4 h-10 text-sm font-medium border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-50"
+      className={
+        variant === "menu"
+          ? "w-full text-left rounded-md px-3 py-2 text-sm text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-50"
+          : "inline-flex items-center justify-center gap-2 rounded-md px-4 h-10 text-sm font-medium border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-50"
+      }
     >
       {pending ? "Deleting..." : "Delete item"}
     </button>

@@ -2,16 +2,19 @@ export const dynamic = "force-dynamic";
 
 import { Card } from "@/components/ui";
 import {
+  getCostMethod,
   getDisplayCurrency,
   getPriceChartingToken,
 } from "@/lib/server/settings";
 import { SettingsForm } from "./SettingsForm";
 import { PriceChartingForm } from "./PriceChartingForm";
+import { CostMethodForm } from "./CostMethodForm";
 
 export default async function SettingsPage() {
-  const [current, token] = await Promise.all([
+  const [current, token, costMethod] = await Promise.all([
     getDisplayCurrency(),
     getPriceChartingToken(),
+    getCostMethod(),
   ]);
   return (
     <div className="flex flex-col gap-6 max-w-xl">
@@ -19,6 +22,13 @@ export default async function SettingsPage() {
       <Card className="p-5">
         <h2 className="font-medium mb-4">Display currency</h2>
         <SettingsForm current={current} />
+      </Card>
+      <Card className="p-5">
+        <h2 className="font-medium mb-1">Cost method</h2>
+        <p className="text-xs text-zinc-500 mb-4">
+          How a sale is matched to what you paid for the units that left.
+        </p>
+        <CostMethodForm current={costMethod} />
       </Card>
       <Card className="p-5">
         <h2 className="font-medium mb-1">PriceCharting integration</h2>
@@ -32,8 +42,8 @@ export default async function SettingsPage() {
           >
             PriceCharting API token
           </a>{" "}
-          to enable per-item live price refresh. Token is stored locally in
-          your database.
+          to enable per-item live price refresh. Token is stored locally in your
+          database.
         </p>
         <PriceChartingForm hasToken={Boolean(token)} />
       </Card>

@@ -11,6 +11,8 @@ import {
   Textarea,
   TextInput,
 } from "@/components/ui";
+import { defaultsToZeroValue, type ExitReason } from "@/lib/calc/exit_reason";
+import { ExitReasonPicker } from "@/components/ExitReasonPicker";
 import {
   formatAmount,
   minorToDecimalString,
@@ -29,6 +31,7 @@ type EditableTransaction = {
   occurredAt: Date;
   note: string;
   status: "pending" | "received";
+  exitReason: ExitReason;
 };
 
 function dateToLocalIso(d: Date) {
@@ -47,6 +50,9 @@ export function EditTransactionForm({
   const [type, setType] = useState<"buy" | "sell">(transaction.type);
   const [itemCostStr, setItemCostStr] = useState(transaction.itemCostDecimal);
   const [shippingStr, setShippingStr] = useState(transaction.shippingDecimal);
+  const [exitReason, setExitReason] = useState<ExitReason>(
+    transaction.exitReason,
+  );
   const [received, setReceived] = useState(transaction.status === "received");
 
   const totalPreview = useMemo(() => {
@@ -68,6 +74,15 @@ export function EditTransactionForm({
     }
   }, [itemCostStr, shippingStr, transaction.currency]);
 
+  function pickExitReason(next: ExitReason) {
+    setExitReason(next);
+    // Only pre-fill when the box is empty or already 0: never overwrite a
+    // value the user typed or that was recorded.
+    if (defaultsToZeroValue(next) && /^0*$/.test(itemCostStr.trim())) {
+      setItemCostStr("0");
+    }
+  }
+
   function onSubmit(formData: FormData) {
     setError(null);
     if (!totalPreview) {
@@ -85,6 +100,7 @@ export function EditTransactionForm({
           type === "buy" ? (received ? "received" : "pending") : "received",
         occurredAt: new Date(String(formData.get("occurredAt") ?? "")),
         note: String(formData.get("note") ?? ""),
+        exitReason: type === "sell" ? exitReason : null,
       });
       if (!res.ok) {
         setError(res.error);
@@ -136,6 +152,12 @@ export function EditTransactionForm({
           </button>
         </div>
       </Field>
+
+      {type === "sell" && (
+        <Field label="Why is it leaving?" htmlFor="exitReason">
+          <ExitReasonPicker value={exitReason} onChange={pickExitReason} />
+        </Field>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Quantity" htmlFor="quantity">

@@ -22,6 +22,7 @@ import {
   type PriceEstimate,
   type PriceEstimateInput,
 } from "./calc/price_estimate";
+import { pickRepresentativeImage } from "./calc/ebay_image";
 
 const OAUTH_URL = "https://api.ebay.com/identity/v1/oauth2/token";
 const BROWSE_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search";
@@ -58,6 +59,8 @@ export type EbayListing = {
   currency: string;
   condition: string | null;
   itemWebUrl: string | null;
+  /** Listing photo, when eBay returned one. */
+  imageUrl: string | null;
 };
 
 export type EbayPriceResult = {
@@ -70,6 +73,8 @@ export type EbayPriceResult = {
   totalMatching: number;
   /** A few of the cheapest kept listings, for the preview table. */
   samples: EbayListing[];
+  /** Photo of the most typical matching listing, if any had one. */
+  imageUrl: string | null;
 };
 
 /* ------------------------------------------------------------------ */
@@ -158,6 +163,8 @@ type RawSummary = {
   }>;
   condition?: string;
   itemWebUrl?: string;
+  image?: { imageUrl?: string };
+  thumbnailImages?: Array<{ imageUrl?: string }>;
 };
 
 export async function searchListings(
@@ -224,6 +231,7 @@ export async function searchListings(
       currency: s.price?.currency ?? "USD",
       condition: s.condition ?? null,
       itemWebUrl: s.itemWebUrl ?? null,
+      imageUrl: s.image?.imageUrl ?? s.thumbnailImages?.[0]?.imageUrl ?? null,
     });
   }
 
@@ -285,5 +293,14 @@ export async function fetchEbayEstimate(
     .sort((a, b) => a.totalMinor - b.totalMinor)
     .slice(0, 5);
 
-  return { estimate, currency, query, totalMatching, samples };
+  // The photo comes from the kept listings (those that survived the
+  // outlier trim), preferring the one priced nearest the estimate.
+  const kept = sameCurrency.filter(
+    (l) =>
+      l.totalMinor >= estimate.keptMinMinor &&
+      l.totalMinor <= estimate.keptMaxMinor,
+  );
+  const imageUrl = pickRepresentativeImage(kept, estimate.priceMinor);
+
+  return { estimate, currency, query, totalMatching, samples, imageUrl };
 }

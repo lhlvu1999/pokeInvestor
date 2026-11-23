@@ -1,11 +1,13 @@
 "use client";
 
+import { ItemLink } from "@/components/ItemDrawer";
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Card, Select, TextInput } from "@/components/ui";
 import { Money } from "@/components/Money";
-import { deleteTransaction } from "@/lib/server/transactions";
+import { DeleteTransactionButton } from "@/app/items/[id]/DeleteTransactionButton";
+import { displayExitReason, EXIT_REASON_LABELS } from "@/lib/calc/exit_reason";
 
 export type HistoryRow = {
   id: string;
@@ -18,15 +20,22 @@ export type HistoryRow = {
   occurredAt: string; // ISO string; converted from Date for client serialization
   note: string | null;
   lotId: string | null;
+  /** Stored exit reason of a sell: null = a normal sale. */
+  exitReason: string | null;
 };
 
 type SortKey = "date" | "item" | "type" | "qty" | "amount";
 type SortDir = "asc" | "desc";
-type TypeFilter = "all" | "buy" | "sell";
+type TypeFilter = "all" | "buy" | "sell" | "exit";
 
 const NUMERIC_KEYS = new Set<SortKey>(["qty", "amount", "date"]);
 
-function compare(a: HistoryRow, b: HistoryRow, key: SortKey, dir: SortDir): number {
+function compare(
+  a: HistoryRow,
+  b: HistoryRow,
+  key: SortKey,
+  dir: SortDir,
+): number {
   let av: string | number;
   let bv: string | number;
   switch (key) {
@@ -75,7 +84,9 @@ export function HistoryTable({ rows }: { rows: HistoryRow[] }) {
   );
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(
-    parsedType === "buy" || parsedType === "sell" ? parsedType : "all",
+    parsedType === "buy" || parsedType === "sell" || parsedType === "exit"
+      ? parsedType
+      : "all",
   );
   const [itemFilter, setItemFilter] = useState<string>(
     () => searchParams.get("item") ?? "all",
@@ -120,7 +131,16 @@ export function HistoryTable({ rows }: { rows: HistoryRow[] }) {
   const filteredSorted = useMemo(() => {
     const term = search.trim().toLowerCase();
     const out = rows.filter((r) => {
-      if (typeFilter !== "all" && r.type !== typeFilter) return false;
+      if (typeFilter === "exit") {
+        if (r.type !== "sell" || displayExitReason(r.exitReason) === "sold")
+          return false;
+      } else if (typeFilter === "sell") {
+        // "Sells" means real sales; gifts and losses have their own filter.
+        if (r.type !== "sell" || displayExitReason(r.exitReason) !== "sold")
+          return false;
+      } else if (typeFilter !== "all" && r.type !== typeFilter) {
+        return false;
+      }
       if (itemFilter !== "all" && r.itemId !== itemFilter) return false;
       if (term && !r.itemName.toLowerCase().includes(term)) return false;
       return true;
@@ -155,6 +175,7 @@ export function HistoryTable({ rows }: { rows: HistoryRow[] }) {
           <option value="all">All types</option>
           <option value="buy">Buys only</option>
           <option value="sell">Sells only</option>
+          <option value="exit">Gifted / lost / opened</option>
         </Select>
         <Select
           value={itemFilter}
@@ -245,45 +266,33 @@ export function HistoryTable({ rows }: { rows: HistoryRow[] }) {
 }
 
 function Row({ row }: { row: HistoryRow }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-
-  function handleDelete() {
-    if (!confirm("Delete this transaction? Holdings will be recalculated.")) {
-      return;
-    }
-    startTransition(async () => {
-      const res = await deleteTransaction(row.id);
-      if (!res.ok) {
-        alert(res.error);
-        return;
-      }
-      router.refresh();
-    });
-  }
-
+  const reason = row.type === "sell" ? displayExitReason(row.exitReason) : null;
+  const isExit = reason != null && reason !== "sold";
   return (
     <tr>
       <td className="px-4 py-2 whitespace-nowrap text-zinc-500">
         {new Date(row.occurredAt).toLocaleDateString()}
       </td>
       <td className="px-4 py-2">
-        <Link
-          href={`/items/${row.itemId}`}
-          className="font-medium hover:underline"
-        >
+        <ItemLink itemId={row.itemId} className="font-medium hover:underline">
           {row.itemName}
-        </Link>
+        </ItemLink>
       </td>
       <td className="px-4 py-2">
         <span
           className={
             row.type === "buy"
               ? "text-emerald-600 dark:text-emerald-400"
-              : "text-rose-600 dark:text-rose-400"
+              : isExit
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-rose-600 dark:text-rose-400"
           }
         >
-          {row.type === "buy" ? "Buy" : "Sell"}
+          {row.type === "buy"
+            ? "Buy"
+            : isExit
+              ? EXIT_REASON_LABELS[reason]
+              : "Sell"}
         </span>
       </td>
       <td className="px-4 py-2 text-right tabular-nums">{row.quantity}</td>
@@ -306,14 +315,7 @@ function Row({ row }: { row: HistoryRow }) {
         >
           Edit
         </Link>
-        <button
-          type="button"
-          onClick={handleDelete}
-          disabled={pending}
-          className="text-xs text-zinc-500 hover:text-rose-600 dark:hover:text-rose-400 disabled:opacity-50"
-        >
-          {pending ? "..." : "Delete"}
-        </button>
+        <DeleteTransactionButton id={row.id} />
       </td>
     </tr>
   );

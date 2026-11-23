@@ -86,7 +86,6 @@ export function PriceHistoryChart({
       <svg
         viewBox={`0 0 ${w} ${h}`}
         width="100%"
-        height="auto"
         preserveAspectRatio="xMidYMid meet"
         className="block"
         style={{ maxHeight: "160px" }}

@@ -41,7 +41,6 @@ export function Histogram({
       <svg
         viewBox={`0 0 ${totalWidth} ${totalHeight}`}
         width="100%"
-        height="auto"
         preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label="Histogram"

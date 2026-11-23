@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { ItemLink } from "@/components/ItemDrawer";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Card, Select, TextInput } from "@/components/ui";
@@ -485,12 +485,12 @@ export function ItemsTable({
                     <div className="flex items-center gap-3 min-w-0">
                       <ItemThumb imageUrl={item.imageUrl} name={item.name} />
                       <div className="min-w-0">
-                        <Link
-                          href={`/items/${item.id}`}
+                        <ItemLink
+                          itemId={item.id}
                           className="font-medium hover:underline"
                         >
                           {item.name}
-                        </Link>
+                        </ItemLink>
                         {(item.setCode || item.cardNumber) && (
                           <div className="text-xs text-zinc-500">
                             {[item.setCode, item.cardNumber]

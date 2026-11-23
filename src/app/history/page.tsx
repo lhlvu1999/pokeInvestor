@@ -6,8 +6,11 @@ import { items, transactions } from "@/db/schema";
 import { ButtonLink, EmptyState } from "@/components/ui";
 import { BulkPasteButton, type Existing } from "./BulkPasteButton";
 import { HistoryTable, type HistoryRow } from "./HistoryTable";
+import { RecentlyDeleted } from "./RecentlyDeleted";
+import { listDeletedTransactions } from "@/lib/server/transactions";
 
 export default async function HistoryPage() {
+  const deleted = await listDeletedTransactions();
   const rows = await db
     .select({
       id: transactions.id,
@@ -20,6 +23,7 @@ export default async function HistoryPage() {
       occurredAt: transactions.occurredAt,
       note: transactions.note,
       lotId: transactions.lotId,
+      exitReason: transactions.exitReason,
     })
     .from(transactions)
     .innerJoin(items, eq(transactions.itemId, items.id))
@@ -78,6 +82,8 @@ export default async function HistoryPage() {
       ) : (
         <HistoryTable rows={data} />
       )}
+
+      <RecentlyDeleted rows={deleted} />
     </div>
   );
 }

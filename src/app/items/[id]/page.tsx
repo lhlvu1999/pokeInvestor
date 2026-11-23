@@ -12,7 +12,9 @@ import { Money } from "@/components/Money";
 import { ButtonLink, Card, EmptyState, StatCard } from "@/components/ui";
 import { MarketPriceForm } from "./MarketPriceForm";
 import { DeleteTransactionButton } from "./DeleteTransactionButton";
+import { MoreMenu } from "@/components/MoreMenu";
 import { DeleteItemButton } from "./DeleteItemButton";
+import { displayExitReason, EXIT_REASON_LABELS } from "@/lib/calc/exit_reason";
 import { MergeItemButton } from "./MergeItemButton";
 import { RefreshPriceButton } from "./RefreshPriceButton";
 import { EbayPricePanel } from "./EbayPricePanel";
@@ -125,19 +127,39 @@ export default async function ItemDetailPage({
           <ButtonLink href={`/transactions/new?itemId=${item.id}&type=sell`}>
             Log sell
           </ButtonLink>
-          <DeleteItemButton
-            id={item.id}
-            name={item.name}
-            txCount={txs.length}
-          />
+          {/* Rare and destructive actions live one click further away. */}
+          <MoreMenu>
+            {valuation.quantity > 0 &&
+              (
+                [
+                  ["gifted", "Gift away…"],
+                  ["lost", "Mark lost / damaged…"],
+                  ["opened", "Mark opened…"],
+                ] as const
+              ).map(([r, label]) => (
+                <Link
+                  key={r}
+                  role="menuitem"
+                  href={`/transactions/new?itemId=${item.id}&exit=${r}`}
+                  className="rounded-md px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  {label}
+                </Link>
+              ))}
+            <MergeItemButton
+              variant="menu"
+              sourceId={item.id}
+              sourceName={item.name}
+              targets={otherItems}
+            />
+            <DeleteItemButton
+              variant="menu"
+              id={item.id}
+              name={item.name}
+              txCount={txs.length}
+            />
+          </MoreMenu>
         </div>
-      </div>
-      <div className="flex justify-end">
-        <MergeItemButton
-          sourceId={item.id}
-          sourceName={item.name}
-          targets={otherItems}
-        />
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -261,10 +283,19 @@ export default async function ItemDetailPage({
                                 className={
                                   tx.type === "buy"
                                     ? "text-emerald-600 dark:text-emerald-400"
-                                    : "text-rose-600 dark:text-rose-400"
+                                    : displayExitReason(tx.exitReason) ===
+                                        "sold"
+                                      ? "text-rose-600 dark:text-rose-400"
+                                      : "text-amber-600 dark:text-amber-400"
                                 }
                               >
-                                {tx.type === "buy" ? "Buy" : "Sell"}
+                                {tx.type === "buy"
+                                  ? "Buy"
+                                  : displayExitReason(tx.exitReason) === "sold"
+                                    ? "Sell"
+                                    : EXIT_REASON_LABELS[
+                                        displayExitReason(tx.exitReason)
+                                      ]}
                               </span>
                               {isPending && (
                                 <span className="inline-flex items-center rounded-full border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">

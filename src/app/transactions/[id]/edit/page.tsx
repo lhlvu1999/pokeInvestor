@@ -8,6 +8,7 @@ import { items, transactions } from "@/db/schema";
 import { Card } from "@/components/ui";
 import { EditTransactionForm } from "./EditTransactionForm";
 import { minorToDecimalString } from "@/lib/currency";
+import { displayExitReason } from "@/lib/calc/exit_reason";
 
 export default async function EditTransactionPage({
   params,
@@ -64,6 +65,7 @@ export default async function EditTransactionPage({
             occurredAt: tx.occurredAt,
             note: tx.note ?? "",
             status: tx.status,
+            exitReason: displayExitReason(tx.exitReason),
           }}
         />
       </Card>

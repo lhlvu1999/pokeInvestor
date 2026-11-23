@@ -10,10 +10,16 @@ import {
   isSupportedCurrency,
   type CurrencyCode,
 } from "@/lib/currency";
+import {
+  DEFAULT_COST_METHOD,
+  isCostMethod,
+  type CostMethod,
+} from "@/lib/calc/holdings";
 import type { ActionResult } from "./items";
 
 const DISPLAY_CURRENCY_KEY = "display_currency";
 const PRICECHARTING_TOKEN_KEY = "pricecharting_token";
+const COST_METHOD_KEY = "cost_method";
 
 /**
  * Cached per server-request — when several server components on the same
@@ -78,4 +84,40 @@ export async function setPriceChartingToken(
   }
   revalidatePath("/settings");
   return { ok: true, data: null };
+}
+
+/**
+ * How sells are matched to purchases when computing realized profit and
+ * remaining cost basis. Cached per request — most pages need it several
+ * times (holdings, cashflow, value chart).
+ */
+const getCostMethodImpl = cache(async (): Promise<CostMethod> => {
+  const [row] = await db
+    .select()
+    .from(appSettings)
+    .where(eq(appSettings.key, COST_METHOD_KEY))
+    .limit(1);
+  return row && isCostMethod(row.value) ? row.value : DEFAULT_COST_METHOD;
+});
+
+export async function getCostMethod(): Promise<CostMethod> {
+  return getCostMethodImpl();
+}
+
+export async function setCostMethod(
+  method: string,
+): Promise<ActionResult<CostMethod>> {
+  if (!isCostMethod(method)) {
+    return { ok: false, error: `Unknown cost method: ${method}` };
+  }
+  await db
+    .insert(appSettings)
+    .values({ key: COST_METHOD_KEY, value: method })
+    .onConflictDoUpdate({
+      target: appSettings.key,
+      set: { value: method, updatedAt: sql`now()` },
+    });
+  // Every figure that involves realized profit or cost basis changes.
+  revalidatePath("/", "layout");
+  return { ok: true, data: method };
 }

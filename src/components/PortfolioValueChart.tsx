@@ -12,8 +12,8 @@ function shortDate(d: Date): string {
 
 /**
  * Portfolio value over time — cost basis (solid) plus market value (dashed
- * when data is complete, hidden until any item has a price snapshot). Same
- * responsive-SVG pattern as CashflowChart.
+ * when data is complete, hidden until any item has a price snapshot). Scales
+ * to its container via a viewBox.
  */
 export function PortfolioValueChart({ data, currency }: Props) {
   if (data.length === 0) {
@@ -30,7 +30,7 @@ export function PortfolioValueChart({ data, currency }: Props) {
     ...data.map((d) => Math.max(d.costBasis, d.marketValue ?? 0)),
   );
 
-  // Layout constants (see CashflowChart for the responsive-SVG story).
+  // Layout constants (the SVG scales to its container via the viewBox).
   const stepX = 40;
   const padLeft = 44;
   const padRight = 12;
@@ -70,14 +70,24 @@ export function PortfolioValueChart({ data, currency }: Props) {
   const gridSteps = [0, 0.25, 0.5, 0.75, 1];
 
   return (
-    <div className="w-full overflow-x-auto">
+    <div className="w-full">
+      {/* On a narrow screen the chart is wider than the viewport and
+          scrolls sideways. A normal scroller starts at the OLDEST week —
+          but the market-value line only covers recent history, so the
+          part that matters would be off-screen. `dir="rtl"` makes the
+          scroller start at its right edge (newest data); the inner box
+          resets to ltr so the chart isn't mirrored.
+          The min-width lives on the inner box on purpose: an RTL scroller
+          can only scroll leftward, so content overflowing to the right
+          would be unreachable. */}
+      <div className="overflow-x-auto" dir="rtl">
+        <div dir="ltr" style={{ minWidth: `${totalWidth / 1.6}px` }}>
       <svg
         viewBox={`0 0 ${totalWidth} ${totalHeight}`}
         width="100%"
-        height="auto"
         preserveAspectRatio="xMidYMid meet"
         className="block"
-        style={{ minWidth: `${totalWidth / 1.6}px`, maxHeight: "240px" }}
+        style={{ maxHeight: "240px" }}
         role="img"
         aria-label="Portfolio value over time"
       >
@@ -177,6 +187,8 @@ export function PortfolioValueChart({ data, currency }: Props) {
           );
         })}
       </svg>
+        </div>
+      </div>
 
       <div className="mt-2 flex flex-wrap gap-4 text-xs text-zinc-600 dark:text-zinc-400">
         <span className="inline-flex items-center gap-1">

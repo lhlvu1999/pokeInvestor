@@ -163,6 +163,7 @@ export async function listWatchlist(): Promise<WatchlistRow[]> {
       note: string | null;
       added_at: Date;
       hit_at: Date | null;
+      target_alerted_at: Date | null;
       linked_item_name: string | null;
       bullish: string;
       bearish: string;
@@ -197,6 +198,7 @@ export async function listWatchlist(): Promise<WatchlistRow[]> {
     SELECT
       w.id, w.name, w.item_id::text AS item_id,
       w.target_buy_price_cents, w.currency, w.note, w.added_at, w.hit_at,
+      w.target_alerted_at,
       it.name AS linked_item_name,
       COALESCE(a.bullish, 0)::text AS bullish,
       COALESCE(a.bearish, 0)::text AS bearish,
@@ -221,6 +223,9 @@ export async function listWatchlist(): Promise<WatchlistRow[]> {
       note: r.note,
       addedAt: new Date(r.added_at),
       hitAt: r.hit_at ? new Date(r.hit_at) : null,
+      targetAlertedAt: r.target_alerted_at
+        ? new Date(r.target_alerted_at)
+        : null,
     },
     linkedItemName: r.linked_item_name,
     bullish: Number(r.bullish),

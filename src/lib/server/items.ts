@@ -18,6 +18,7 @@ import {
   type ItemValuation,
 } from "@/lib/calc/holdings";
 import { itemMatchKey } from "@/lib/import";
+import { getCostMethod } from "./settings";
 
 const itemSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(200),
@@ -449,10 +450,11 @@ export async function listItemsWithValuations(): Promise<ItemWithValuation[]> {
   }
 
   const latestPrices = await getLatestPricesByItem();
+  const method = await getCostMethod();
 
   return allItems.map((item) => {
     const itemTxs = byItem.get(item.id) ?? [];
-    const snap = computeHoldings(itemTxs);
+    const snap = computeHoldings(itemTxs, method);
     const latestPrice = latestPrices.get(item.id) ?? null;
     const lastTxAt =
       itemTxs.length === 0
@@ -488,7 +490,7 @@ export async function getItemDetail(id: string): Promise<ItemDetail | null> {
     .orderBy(desc(marketPrices.fetchedAt))
     .limit(1);
 
-  const snap = computeHoldings(itemTxs);
+  const snap = computeHoldings(itemTxs, await getCostMethod());
   const valuation = valueHoldings(snap, latestPrice?.priceCents ?? null);
   const lastTxAt =
     itemTxs.length === 0

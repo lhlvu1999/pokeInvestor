@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { ItemLink } from "@/components/ItemDrawer";
 import { Card } from "@/components/ui";
 import { ItemThumb } from "@/components/ItemThumb";
 import { Money } from "@/components/Money";
@@ -81,12 +81,12 @@ export function SellScorecard({
                         name={c.name}
                         size={28}
                       />
-                      <Link
-                        href={`/items/${c.itemId}`}
+                      <ItemLink
+                        itemId={c.itemId}
                         className="font-medium hover:underline truncate"
                       >
                         {c.name}
-                      </Link>
+                      </ItemLink>
                     </div>
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">

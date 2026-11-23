@@ -125,6 +125,12 @@ export const transactions = pgTable(
      * effectively received.
      */
     status: transactionStatusEnum("status").notNull().default("received"),
+    /**
+     * Why a sell removed stock: null = a normal sale; otherwise 'gifted',
+     * 'lost' or 'opened' (see lib/calc/exit_reason). Always null on buys.
+     * These still count in realized profit but not in sale statistics.
+     */
+    exitReason: text("exit_reason"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -133,6 +139,29 @@ export const transactions = pgTable(
     index("transactions_item_occurred_idx").on(t.itemId, t.occurredAt),
     index("transactions_lot_idx").on(t.lotId),
   ],
+);
+
+/**
+ * Safety net for deleted transactions. A delete removes the row from
+ * `transactions` (so no query anywhere has to know about "soft deleted"
+ * rows) and keeps a JSON copy here for a while, so it can be restored from
+ * History's "Recently deleted" list after the undo toast is gone.
+ *
+ * `id` is the original transaction id. Rows disappear with their item.
+ */
+export const deletedTransactions = pgTable(
+  "deleted_transactions",
+  {
+    id: uuid("id").primaryKey(),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    snapshot: jsonb("snapshot").notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("deleted_transactions_deleted_at_idx").on(t.deletedAt)],
 );
 
 /**
@@ -486,6 +515,13 @@ export const watchlistItems = pgTable(
      * bought it, or a market_price crossed the target. Null while
      * still active. */
     hitAt: timestamp("hit_at", { withTimezone: true }),
+    /** Set when the pipeline's daily check alerted that the linked item's
+     * market price reached `targetBuyPriceCents`. Separate from `hitAt`
+     * on purpose: `hitAt` retires the entry from the active list, whereas
+     * a price alert is only a notification — the entry stays on the
+     * watchlist until you buy it. Cleared again when the price climbs back
+     * above the target, so the next dip alerts afresh. */
+    targetAlertedAt: timestamp("target_alerted_at", { withTimezone: true }),
   },
   (t) => [
     index("watchlist_items_item_idx").on(t.itemId),

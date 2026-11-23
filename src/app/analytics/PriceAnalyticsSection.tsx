@@ -1,3 +1,4 @@
+import { ItemLink } from "@/components/ItemDrawer";
 import Link from "next/link";
 import { Card, StatCard } from "@/components/ui";
 import { ItemThumb } from "@/components/ItemThumb";
@@ -180,12 +181,12 @@ export function PriceAnalyticsSection({
                         name={p.name}
                         size={28}
                       />
-                      <Link
-                        href={`/items/${p.itemId}`}
+                      <ItemLink
+                        itemId={p.itemId}
                         className="font-medium hover:underline truncate"
                       >
                         {p.name}
-                      </Link>
+                      </ItemLink>
                     </div>
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
@@ -265,12 +266,12 @@ function MoversTable({
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <ItemThumb imageUrl={p.imageUrl} name={p.name} size={24} />
-                <Link
-                  href={`/items/${p.itemId}`}
+                <ItemLink
+                  itemId={p.itemId}
                   className="text-sm hover:underline truncate"
                 >
                   {p.name}
-                </Link>
+                </ItemLink>
               </div>
               <div className="text-right shrink-0">
                 <div
