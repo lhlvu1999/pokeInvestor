@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: poke-pipeline-watchlist-alerts
+  labels:
+    app: poke-pipeline
+    phase: watchlist-alerts
+spec:
+  # Once a day is enough: market prices only change when they are refreshed,
+  # and the command alerts once per crossing, not once per run.
+  schedule: "0 2 * * *"                 # 02:00 UTC = 09:00 in Vietnam
+  timezone: "UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  workflowSpec:
+    workflowTemplateRef:
+      name: poke-pipeline
+    arguments:
+      parameters:
+        - name: phase
+          value: watchlist-alerts

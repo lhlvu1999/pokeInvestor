@@ -6,8 +6,22 @@ import { items, transactions } from "@/db/schema";
 import { ButtonLink, EmptyState } from "@/components/ui";
 import { BulkPasteButton, type Existing } from "./BulkPasteButton";
 import { HistoryTable, type HistoryRow } from "./HistoryTable";
+import { RecentlyDeleted } from "./RecentlyDeleted";
+import { listDeletedTransactions } from "@/lib/server/transactions";
+import { getPurchaseFunding } from "@/lib/server/capital";
+import { getDisplayCurrency } from "@/lib/server/settings";
+import { safe } from "@/lib/server/safe";
 
 export default async function HistoryPage() {
+  const [deleted, funding] = await Promise.all([
+    listDeletedTransactions(),
+    // Optional: a failure just means no funding labels.
+    safe(
+      "purchase funding",
+      async () => getPurchaseFunding(await getDisplayCurrency()),
+      {},
+    ),
+  ]);
   const rows = await db
     .select({
       id: transactions.id,
@@ -20,6 +34,7 @@ export default async function HistoryPage() {
       occurredAt: transactions.occurredAt,
       note: transactions.note,
       lotId: transactions.lotId,
+      exitReason: transactions.exitReason,
     })
     .from(transactions)
     .innerJoin(items, eq(transactions.itemId, items.id))
@@ -29,6 +44,7 @@ export default async function HistoryPage() {
   const data: HistoryRow[] = rows.map((r) => ({
     ...r,
     occurredAt: r.occurredAt.toISOString(),
+    funding: r.type === "buy" ? (funding[r.id] ?? null) : null,
   }));
 
   // Distinct item names + their most-recent currency for the bulk-paste
@@ -48,22 +64,35 @@ export default async function HistoryPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
+      <div className="flex flex-wrap items-start gap-x-2 gap-y-3">
+        <div className="mr-auto min-w-0">
           <h1 className="text-2xl font-semibold">Transaction history</h1>
           <p className="text-xs text-zinc-500 mt-1">
             All transactions across all items, newest first.
           </p>
         </div>
-        <div className="flex gap-2">
+        {/* Phones: the main action stays on top, the rest wrap below. */}
+        <ButtonLink
+          href="/transactions/new"
+          className="order-2 sm:order-3 w-full sm:w-auto"
+        >
+          Add transaction
+        </ButtonLink>
+        <div className="order-3 sm:order-2 flex gap-2 w-full sm:w-auto">
           <a
             href="/api/export/transactions"
-            className="inline-flex items-center justify-center gap-2 rounded-md px-4 h-10 text-sm font-medium border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            className="inline-flex flex-1 sm:flex-none items-center justify-center gap-2 whitespace-nowrap rounded-md px-4 h-10 text-sm font-medium border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
             Export CSV
           </a>
           <BulkPasteButton existing={existing} />
-          <ButtonLink href="/transactions/new">Add transaction</ButtonLink>
+          <ButtonLink
+            href="/import"
+            variant="secondary"
+            className="flex-1 sm:flex-none"
+          >
+            Import CSV
+          </ButtonLink>
         </div>
       </div>
 
@@ -78,6 +107,8 @@ export default async function HistoryPage() {
       ) : (
         <HistoryTable rows={data} />
       )}
+
+      <RecentlyDeleted rows={deleted} />
     </div>
   );
 }

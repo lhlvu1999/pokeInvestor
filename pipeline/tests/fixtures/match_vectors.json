@@ -1,0 +1,599 @@
+{
+  "catalog": [
+    {
+      "id": 1,
+      "name": "Black Bolt Elite Trainer Box",
+      "set": "SV: Black Bolt",
+      "language": "en"
+    },
+    {
+      "id": 2,
+      "name": "Black Bolt Booster Box",
+      "set": "SV: Black Bolt",
+      "language": "en"
+    },
+    {
+      "id": 3,
+      "name": "Black Bolt Booster Bundle",
+      "set": "SV: Black Bolt",
+      "language": "en"
+    },
+    {
+      "id": 4,
+      "name": "Black Bolt Elite Trainer Box Case",
+      "set": "SV: Black Bolt",
+      "language": "en"
+    },
+    {
+      "id": 5,
+      "name": "Ascended Heroes Mini Tin Display",
+      "set": "ME: Ascended Heroes",
+      "language": "en"
+    },
+    {
+      "id": 6,
+      "name": "Ascended Heroes Mini Tin [Pikachu & Dachsbun]",
+      "set": "ME: Ascended Heroes",
+      "language": "en"
+    },
+    {
+      "id": 7,
+      "name": "Ascended Heroes Mini Tin [Riolu & Dachsbun]",
+      "set": "ME: Ascended Heroes",
+      "language": "en"
+    },
+    {
+      "id": 8,
+      "name": "Chaos Rising Booster Box",
+      "set": "ME04: Chaos Rising",
+      "language": "en"
+    },
+    {
+      "id": 9,
+      "name": "Prismatic Evolutions 2-Pack Blister [Eevee]",
+      "set": "SV: Prismatic Evolutions",
+      "language": "en"
+    },
+    {
+      "id": 10,
+      "name": "Prismatic Evolutions Surprise Box",
+      "set": "SV: Prismatic Evolutions",
+      "language": "en"
+    },
+    {
+      "id": 11,
+      "name": "Prismatic Evolutions Elite Trainer Box",
+      "set": "SV: Prismatic Evolutions",
+      "language": "en"
+    },
+    {
+      "id": 12,
+      "name": "Mega Dream ex Booster Box",
+      "set": "M2a: High Class Pack",
+      "language": "ja"
+    },
+    {
+      "id": 13,
+      "name": "Pokémon Day 2026 Collection",
+      "set": "Miscellaneous Cards & Products",
+      "language": "en"
+    },
+    {
+      "id": 14,
+      "name": "Pokémon Day 2026 Collection Case",
+      "set": "Miscellaneous Cards & Products",
+      "language": "en"
+    },
+    {
+      "id": 15,
+      "name": "Surging Sparks Booster Bundle (LGS)",
+      "set": "SV08: Surging Sparks",
+      "language": "en"
+    },
+    {
+      "id": 16,
+      "name": "Surging Sparks Booster Bundle (Retail)",
+      "set": "SV08: Surging Sparks",
+      "language": "en"
+    },
+    {
+      "id": 17,
+      "name": "Same Name Box",
+      "set": "Set",
+      "language": "en"
+    },
+    {
+      "id": 18,
+      "name": "Same Name Box",
+      "set": "Set",
+      "language": "en"
+    },
+    {
+      "id": 19,
+      "name": "Legends of Galar Tin [Zacian V] (International Version)",
+      "set": "SWSH02: Rebel Clash",
+      "language": "en"
+    },
+    {
+      "id": 20,
+      "name": "Celebrations Elite Trainer Box",
+      "set": "Celebrations",
+      "language": "en"
+    }
+  ],
+  "cases": [
+    {
+      "item": "Black Bolt Elite Trainer Box",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 1,
+          "score": 1
+        },
+        {
+          "productId": 4,
+          "score": 0.733333333
+        },
+        {
+          "productId": 20,
+          "score": 0.56
+        }
+      ]
+    },
+    {
+      "item": "Black Bolt ETB",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 1,
+          "score": 1
+        },
+        {
+          "productId": 4,
+          "score": 0.733333333
+        },
+        {
+          "productId": 20,
+          "score": 0.56
+        }
+      ]
+    },
+    {
+      "item": "Black Bolt Booster Box",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 2,
+          "score": 1
+        },
+        {
+          "productId": 1,
+          "score": 0.65
+        },
+        {
+          "productId": 3,
+          "score": 0.49
+        }
+      ]
+    },
+    {
+      "item": "Black Bolt Booster Bundle",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 3,
+          "score": 1
+        },
+        {
+          "productId": 2,
+          "score": 0.49
+        },
+        {
+          "productId": 15,
+          "score": 0.414285714
+        }
+      ]
+    },
+    {
+      "item": "Ascended Heroes Mini Tin",
+      "tags": [],
+      "status": "ambiguous",
+      "options": [
+        {
+          "productId": 6,
+          "score": 0.866666667
+        },
+        {
+          "productId": 7,
+          "score": 0.866666667
+        },
+        {
+          "productId": 5,
+          "score": 0.72
+        }
+      ]
+    },
+    {
+      "item": "Ascended Heroes Mini Tin Pikachu Dachsbun",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 6,
+          "score": 1
+        },
+        {
+          "productId": 7,
+          "score": 0.785714286
+        },
+        {
+          "productId": 5,
+          "score": 0.428571429
+        }
+      ]
+    },
+    {
+      "item": "Chaos Rising Booster Box 36 packs",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 8,
+          "score": 1
+        },
+        {
+          "productId": 2,
+          "score": 0.433333333
+        },
+        {
+          "productId": 12,
+          "score": 0.414285714
+        }
+      ]
+    },
+    {
+      "item": "surging sparks booster box 36 packs",
+      "tags": [],
+      "status": "none",
+      "options": [
+        {
+          "productId": 15,
+          "score": 0.45
+        },
+        {
+          "productId": 16,
+          "score": 0.45
+        },
+        {
+          "productId": 2,
+          "score": 0.433333333
+        }
+      ]
+    },
+    {
+      "item": "Prismatic Evolutions 2Blister [Eevee]",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 9,
+          "score": 1
+        },
+        {
+          "productId": 10,
+          "score": 0.1
+        },
+        {
+          "productId": 11,
+          "score": 0.088888889
+        }
+      ]
+    },
+    {
+      "item": "Prismatic Evolutions Elite Trainer Box",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 11,
+          "score": 1
+        },
+        {
+          "productId": 10,
+          "score": 0.56
+        },
+        {
+          "productId": 20,
+          "score": 0.56
+        }
+      ]
+    },
+    {
+      "item": "Mega Dream ex Booster Box",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 12,
+          "score": 1
+        },
+        {
+          "productId": 2,
+          "score": 0.354285714
+        },
+        {
+          "productId": 8,
+          "score": 0.354285714
+        }
+      ]
+    },
+    {
+      "item": "Pokémon Day 2026 Collection Box",
+      "tags": [],
+      "status": "probable",
+      "options": [
+        {
+          "productId": 13,
+          "score": 0.75
+        },
+        {
+          "productId": 14,
+          "score": 0.49
+        },
+        {
+          "productId": 17,
+          "score": 0.216666667
+        }
+      ]
+    },
+    {
+      "item": "Pokemon Day 2026 Collection",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 13,
+          "score": 1
+        },
+        {
+          "productId": 14,
+          "score": 0.7
+        }
+      ]
+    },
+    {
+      "item": "Surging Sparks Booster Bundle",
+      "tags": [],
+      "status": "ambiguous",
+      "options": [
+        {
+          "productId": 15,
+          "score": 0.92
+        },
+        {
+          "productId": 16,
+          "score": 0.92
+        },
+        {
+          "productId": 3,
+          "score": 0.433333333
+        }
+      ]
+    },
+    {
+      "item": "Same Name Box",
+      "tags": [],
+      "status": "ambiguous",
+      "options": [
+        {
+          "productId": 17,
+          "score": 1
+        },
+        {
+          "productId": 18,
+          "score": 1
+        },
+        {
+          "productId": 10,
+          "score": 0.266666667
+        }
+      ]
+    },
+    {
+      "item": "Slashing Legends Tin (International Version)",
+      "tags": [],
+      "status": "weak",
+      "options": [
+        {
+          "productId": 19,
+          "score": 0.68
+        },
+        {
+          "productId": 6,
+          "score": 0.16
+        },
+        {
+          "productId": 7,
+          "score": 0.16
+        }
+      ]
+    },
+    {
+      "item": "Celebrations Elite Trainer Box 25th",
+      "tags": [],
+      "status": "probable",
+      "options": [
+        {
+          "productId": 20,
+          "score": 0.8
+        },
+        {
+          "productId": 1,
+          "score": 0.531428571
+        },
+        {
+          "productId": 11,
+          "score": 0.531428571
+        }
+      ]
+    },
+    {
+      "item": "Totally Different Product Name",
+      "tags": [],
+      "status": "none",
+      "options": [
+        {
+          "productId": 17,
+          "score": 0.016666667
+        },
+        {
+          "productId": 18,
+          "score": 0.016666667
+        }
+      ]
+    },
+    {
+      "item": "slab psa 10 Black Bolt Elite Trainer Box",
+      "tags": [],
+      "status": "not_sealed",
+      "options": []
+    },
+    {
+      "item": "psa 10 Pikachu",
+      "tags": [],
+      "status": "not_sealed",
+      "options": []
+    },
+    {
+      "item": "Charizard PSA 9",
+      "tags": [],
+      "status": "not_sealed",
+      "options": []
+    },
+    {
+      "item": "promo Mimikyu 075",
+      "tags": [],
+      "status": "not_sealed",
+      "options": []
+    },
+    {
+      "item": "Anything",
+      "tags": [
+        "slab"
+      ],
+      "status": "not_sealed",
+      "options": []
+    },
+    {
+      "item": "",
+      "tags": [],
+      "status": "none",
+      "options": []
+    },
+    {
+      "item": "***",
+      "tags": [],
+      "status": "none",
+      "options": []
+    },
+    {
+      "item": "Black   Bolt\tElite Trainer  Box!!",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 1,
+          "score": 1
+        },
+        {
+          "productId": 4,
+          "score": 0.733333333
+        },
+        {
+          "productId": 20,
+          "score": 0.56
+        }
+      ]
+    },
+    {
+      "item": "BLACK BOLT ELITE TRAINER BOX",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 1,
+          "score": 1
+        },
+        {
+          "productId": 4,
+          "score": 0.733333333
+        },
+        {
+          "productId": 20,
+          "score": 0.56
+        }
+      ]
+    },
+    {
+      "item": "Black Bolt & Elite Trainer Box",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 1,
+          "score": 1
+        },
+        {
+          "productId": 4,
+          "score": 0.733333333
+        },
+        {
+          "productId": 20,
+          "score": 0.56
+        }
+      ]
+    },
+    {
+      "item": "Prismatic Evolutions 3 Pack Blister",
+      "tags": [],
+      "status": "probable",
+      "options": [
+        {
+          "productId": 9,
+          "score": 0.708571429
+        },
+        {
+          "productId": 10,
+          "score": 0.154285714
+        },
+        {
+          "productId": 11,
+          "score": 0.14
+        }
+      ]
+    },
+    {
+      "item": "Elite Trainer Box",
+      "tags": [],
+      "status": "confident",
+      "options": [
+        {
+          "productId": 20,
+          "score": 0.9
+        },
+        {
+          "productId": 1,
+          "score": 0.84
+        },
+        {
+          "productId": 11,
+          "score": 0.84
+        }
+      ]
+    }
+  ]
+}

@@ -86,7 +86,7 @@ export function EmptyState({
 /* ------------------------------------------------------------------ */
 
 const buttonBase =
-  "inline-flex items-center justify-center gap-2 rounded-lg px-4 h-10 text-sm font-medium transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed select-none active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-900";
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 h-10 text-sm font-medium transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed select-none active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-900";
 
 const buttonVariants = {
   primary:
@@ -196,6 +196,10 @@ export function Textarea(props: ComponentProps<"textarea">) {
  * Styled checkbox replacing the native input's chrome with a square box that
  * picks up the brand color when checked. Use anywhere we'd otherwise use
  * `<input type="checkbox" />`. All native props pass through.
+ *
+ * The look is the `.pi-checkbox` class in globals.css, not a long list of
+ * utilities here: this renders on every row of long tables, and ~830 characters
+ * of classes per row made the History page megabytes larger.
  */
 export function Checkbox({
   className = "",
@@ -204,13 +208,7 @@ export function Checkbox({
   return (
     <input
       type="checkbox"
-      className={`appearance-none w-4 h-4 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 transition-colors cursor-pointer
-        checked:bg-zinc-900 checked:border-zinc-900 dark:checked:bg-zinc-100 dark:checked:border-zinc-100
-        hover:border-zinc-400 dark:hover:border-zinc-500
-        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 dark:focus-visible:ring-zinc-100 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-900
-        relative
-        checked:after:content-[''] checked:after:absolute checked:after:left-[3px] checked:after:top-0 checked:after:w-[6px] checked:after:h-[10px] checked:after:border-r-2 checked:after:border-b-2 checked:after:border-white dark:checked:after:border-zinc-900 checked:after:rotate-45
-        ${className}`}
+      className={`pi-checkbox ${className}`}
       {...rest}
     />
   );

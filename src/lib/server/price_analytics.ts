@@ -21,12 +21,17 @@ import {
   type PriceChange,
   type PricePoint,
 } from "@/lib/calc/price_history";
+import { pickMovers } from "@/lib/calc/movers";
+import type { ConvertedItemValues } from "@/lib/calc/portfolio";
 import { convertMinor, type CurrencyCode } from "@/lib/currency";
 import { getRate } from "@/lib/fx";
+import type { ItemWithValuation } from "./items";
 import { getDashboardData } from "./portfolio";
 
 /** Lookback for the "movers" ranking. */
 export const MOVER_WINDOW_DAYS = 30;
+/** A change measured over less than this isn't a market move (see movers.ts). */
+export const MIN_MOVER_SPAN_DAYS = 3;
 
 export type PricedPosition = {
   itemId: string;
@@ -69,8 +74,12 @@ const TOP_N = 8;
 
 export async function getPriceAnalytics(
   displayCurrency: CurrencyCode,
+  /** Pass the dashboard's already-loaded data to avoid recomputing every
+   * item's valuation and FX rate a second time on the same request. */
+  preloaded?: { items: ItemWithValuation[]; converted: ConvertedItemValues[] },
 ): Promise<PriceAnalytics> {
-  const { items, converted } = await getDashboardData(displayCurrency);
+  const { items, converted } =
+    preloaded ?? (await getDashboardData(displayCurrency));
 
   // Held positions only — an item you fully sold has no unrealized P&L.
   const held = items
@@ -180,9 +189,10 @@ export async function getPriceAnalytics(
   positions.sort((a, b) => b.marketValueDisplay - a.marketValueDisplay);
 
   const withChange = positions.filter((p) => p.change != null);
-  const byChangeDesc = [...withChange].sort(
-    (a, b) => b.change!.changePct - a.change!.changePct,
-  );
+  const { gainers, losers } = pickMovers(positions, {
+    topN: TOP_N,
+    minSpanDays: MIN_MOVER_SPAN_DAYS,
+  });
 
   return {
     positions,
@@ -192,13 +202,8 @@ export async function getPriceAnalytics(
     totalCostBasis: positions.reduce((s, p) => s + p.costBasisDisplay, 0),
     totalMarketValue: positions.reduce((s, p) => s + p.marketValueDisplay, 0),
     totalUnrealized: positions.reduce((s, p) => s + p.unrealizedDisplay, 0),
-    topGainers: byChangeDesc
-      .filter((p) => p.change!.changePct > 0)
-      .slice(0, TOP_N),
-    topLosers: byChangeDesc
-      .filter((p) => p.change!.changePct < 0)
-      .slice(-TOP_N)
-      .reverse(),
+    topGainers: gainers,
+    topLosers: losers,
     withHistoryCount: withChange.length,
   };
 }

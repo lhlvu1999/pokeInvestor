@@ -15,7 +15,20 @@ import sys
 
 import typer
 
-from poke_pipeline import backfill, discover, extract, transcripts
+from poke_pipeline import (
+    backfill,
+    catalog,
+    catalog_images,
+    catalog_link,
+    discover,
+    extract,
+    price_refresh,
+    sell_alerts,
+    stage_alerts,
+    transcripts,
+    watchlist_alerts,
+    weekly_digest,
+)
 from poke_pipeline.db import close_pool
 
 app = typer.Typer(
@@ -148,6 +161,302 @@ def cmd_insights() -> None:
         typer.echo(
             f"insights: {result.processed} processed, "
             f"{result.skipped} skipped, {result.errored} errored"
+        )
+    finally:
+        close_pool()
+
+
+@app.command("watchlist-alerts")
+def cmd_watchlist_alerts(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print what would be sent; post nothing and change nothing.",
+    ),
+    stage: bool = typer.Option(
+        True,
+        "--stage/--no-stage",
+        help="Also run the opt-in 'usual low point' alerts (see stage-alerts).",
+    ),
+    sell: bool = typer.Option(
+        True,
+        "--sell/--no-sell",
+        help="Also run the sell-target alerts (see sell-alerts).",
+    ),
+) -> None:
+    """Alert (via ALERT_WEBHOOK_URL) when a watchlist item's market price
+    reaches its buy target. One alert per crossing; re-arms when the price
+    climbs back above target. Also sends the opt-in "usual low point" alerts
+    (--no-stage to skip them) and the sell-target alerts for items you hold
+    (--no-sell to skip them). Run it daily.
+    """
+    try:
+        r = watchlist_alerts.run(dry_run=dry_run)
+        typer.echo(
+            f"watchlist-alerts: {r.checked} checked, {r.alerted} alerted, "
+            f"{r.rearmed} re-armed, {r.skipped} skipped (currency mismatch)"
+        )
+        if stage:
+            s = stage_alerts.run(dry_run=dry_run)
+            typer.echo(
+                f"stage-alerts: {s.checked} checked, {s.alerted} alerted, "
+                f"{s.skipped} skipped (no age, kind or usual low)"
+            )
+        if sell:
+            x = sell_alerts.run(dry_run=dry_run)
+            typer.echo(
+                f"sell-alerts: {x.checked} checked, {x.alerted} alerted, "
+                f"{x.rearmed} re-armed, {x.skipped} skipped (nothing held, or currency mismatch)"
+            )
+    finally:
+        close_pool()
+
+
+@app.command("weekly-digest")
+def cmd_weekly_digest(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print the message; post nothing.",
+    ),
+) -> None:
+    """Post a weekly summary (via ALERT_WEBHOOK_URL): what the stock is worth and
+    how prices moved it, the week's sales and spending, and anything worth a
+    look. Read-only: it writes nothing to the database. Run it once a week.
+    """
+    try:
+        r = weekly_digest.run(dry_run=dry_run)
+        if not dry_run:
+            typer.echo(f"weekly-digest: {'posted' if r.posted else 'not posted'}")
+    finally:
+        close_pool()
+
+
+@app.command("refresh-prices")
+def cmd_refresh_prices() -> None:
+    """Ask the web app (APP_URL, with CRON_TOKEN) to refresh market prices for the
+    items you hold, the way its "Update all prices" button does. Run it daily,
+    before the alerts. Exits non-zero if the refresh failed or gave up.
+    """
+    try:
+        r = price_refresh.run()
+    except price_refresh.ConfigError as e:
+        typer.echo(f"refresh-prices: {e}", err=True)
+        raise typer.Exit(2) from e
+    typer.echo(r.message)
+    for p in r.body.get("problems", []):
+        typer.echo(f"  {p.get('status')}: {p.get('name')}" + (f" ({p['message']})" if p.get("message") else ""))
+    if not r.ok:
+        raise typer.Exit(1)
+
+
+@app.command("sell-alerts")
+def cmd_sell_alerts(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print what would be sent; post nothing and change nothing.",
+    ),
+) -> None:
+    """Alert (via ALERT_WEBHOOK_URL) when an item you hold reaches the sell
+    target set on its page. One alert per crossing; re-arms when the price
+    falls back below target. Market prices are estimates.
+    """
+    try:
+        x = sell_alerts.run(dry_run=dry_run)
+        typer.echo(
+            f"sell-alerts: {x.checked} checked, {x.alerted} alerted, "
+            f"{x.rearmed} re-armed, {x.skipped} skipped (nothing held, or currency mismatch)"
+        )
+    finally:
+        close_pool()
+
+
+@app.command("stage-alerts")
+def cmd_stage_alerts(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print what would be sent; post nothing and change nothing.",
+    ),
+) -> None:
+    """Alert (via ALERT_WEBHOOK_URL) when a watched product, opted in on the
+    watchlist page, reaches the age at which earlier launches of its kind have
+    typically been at their lowest price. One alert per product; describes past
+    launches and is not a recommendation.
+    """
+    try:
+        s = stage_alerts.run(dry_run=dry_run)
+        typer.echo(
+            f"stage-alerts: {s.checked} checked, {s.alerted} alerted, "
+            f"{s.skipped} skipped (no age, kind or usual low)"
+        )
+    finally:
+        close_pool()
+
+
+@app.command("catalog-sync")
+def cmd_catalog_sync(
+    day: str = typer.Option(
+        "",
+        "--day",
+        help="Price archive day (YYYY-MM-DD). Default: the newest one published.",
+    ),
+    max_sets: int = typer.Option(
+        catalog.DEFAULT_MAX_SETS,
+        "--max-sets",
+        help="Most set product-lists to read this run (a first run needs ~690).",
+    ),
+    link: bool = typer.Option(
+        True,
+        "--link/--no-link",
+        help="Afterwards, link clear matches among the items you hold and fill images.",
+    ),
+) -> None:
+    """Sync English + Japanese Pokémon sets, sealed products and set totals
+    from the TCGCSV mirror of TCGplayer, then link the items you hold to
+    their catalogue products. Run it daily after 20:00 UTC.
+    """
+    from datetime import date as _date
+
+    try:
+        r = catalog.run(
+            day=_date.fromisoformat(day) if day else None,
+            max_sets=max_sets,
+        )
+        typer.echo(
+            f"catalog-sync {r.day}: {r.sets} sets ({r.sets_fetched} product lists read), "
+            f"{r.sealed_prices} sealed prices, {r.set_rows} set totals, "
+            f"{r.top_rows} top-card rows"
+            + (f", {r.skipped_sets} sets skipped (no products yet)" if r.skipped_sets else "")
+        )
+        if link:
+            _echo_link_result(catalog_link.link_stock())
+            _echo_fill_result(catalog_images.fill_images())
+            _echo_slab_result(catalog_images.link_slabs())
+    finally:
+        close_pool()
+
+
+def _echo_link_result(r: catalog_link.LinkResult) -> None:
+    typer.echo(
+        f"catalog-link: {len(r.linked)} of {r.considered} held items linked automatically, "
+        f"{r.left_for_review} left for you to review, {r.images_filled} images filled"
+    )
+
+
+def _echo_fill_result(r: catalog_images.FillResult) -> None:
+    typer.echo(
+        f"catalog-images: {len(r.sealed)} sealed and {len(r.slabs)} slab pictures filled, "
+        f"{r.left} items still without one"
+    )
+
+
+def _echo_slab_result(r: catalog_images.SlabLinkResult) -> None:
+    typer.echo(f"catalog-slabs: {len(r.linked)} of {r.considered} unmatched slabs matched to a card")
+
+
+@app.command("catalog-link-slabs")
+def cmd_catalog_link_slabs(
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="List the matches; change nothing."
+    ),
+) -> None:
+    """Match graded slabs to the catalogue card they are (by card number,
+    language and name; only a single clear match) so the card's raw price is
+    kept by catalog-sync. Never touches a slab you marked as wrongly matched.
+    """
+    try:
+        r = catalog_images.link_slabs(dry_run=dry_run)
+        if dry_run:
+            for item, card in r.linked:
+                typer.echo(f"  {item}  ->  {card}")
+        _echo_slab_result(r)
+    finally:
+        close_pool()
+
+
+@app.command("catalog-link-stock")
+def cmd_catalog_link_stock(
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="List what would be linked; change nothing."
+    ),
+) -> None:
+    """Link the items you currently hold to catalogue products (clear matches
+    only) and fill missing images, without re-syncing prices. Never overrides a
+    link, skip or unlink you made yourself.
+    """
+    try:
+        r = catalog_link.link_stock(dry_run=dry_run)
+        if dry_run:
+            for item, product in r.linked:
+                typer.echo(f"  would link  {item}  ->  {product}")
+        _echo_link_result(r)
+    finally:
+        close_pool()
+
+
+@app.command("catalog-fill-images")
+def cmd_catalog_fill_images(
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="List what would be filled; change nothing."
+    ),
+) -> None:
+    """Fill missing item pictures from the catalogue without linking anything:
+    sealed products you have sold, and graded slabs (matched by card number).
+    Never replaces a picture that is already there.
+    """
+    try:
+        r = catalog_images.fill_images(dry_run=dry_run)
+        if dry_run:
+            for item, product in r.sealed:
+                typer.echo(f"  sealed  {item}  ->  {product}")
+            for item, card in r.slabs:
+                typer.echo(f"  slab    {item}  ->  {card}")
+        typer.echo(
+            f"catalog-fill-images: {len(r.sealed)} sealed and {len(r.slabs)} slab pictures "
+            f"{'would be filled' if dry_run else 'filled'}, {r.left} items left for you to do by hand"
+        )
+    finally:
+        close_pool()
+
+
+@app.command("catalog-backfill")
+def cmd_catalog_backfill(
+    start: str = typer.Option(
+        catalog.BACKFILL_FIRST_DAY.isoformat(),
+        "--from",
+        help="First day to load (YYYY-MM-DD). The archive starts 2024-02-08.",
+    ),
+    end: str = typer.Option("", "--to", help="Last day (YYYY-MM-DD). Default: yesterday."),
+    oldest_first: bool = typer.Option(
+        False, "--oldest-first", help="Load oldest days first (default: newest first)."
+    ),
+    limit: int = typer.Option(0, "--limit", help="Load at most this many days (0 = all)."),
+    delay: float = typer.Option(
+        2.0, "--delay", help="Seconds to wait between days; keep it polite."
+    ),
+) -> None:
+    """Load TCGplayer price history from TCGCSV's daily archive.
+
+    Resumable: days already stored are skipped, so you can stop it and run it
+    again. Run `catalog-sync` first so the catalogue's products exist.
+    """
+    from datetime import date as _date
+
+    try:
+        r = catalog.backfill(
+            start=_date.fromisoformat(start),
+            end=_date.fromisoformat(end) if end else None,
+            newest_first=not oldest_first,
+            limit=limit or None,
+            delay=delay,
+        )
+        typer.echo(
+            f"catalog-backfill: {r.loaded} of {r.planned} days loaded "
+            f"({r.sealed_rows} sealed prices, {r.set_rows} set totals, {r.top_rows} top-card rows)"
+            + (f"; {len(r.missing)} days have no archive" if r.missing else "")
+            + (f"; {len(r.failed)} failed, run again to retry" if r.failed else "")
         )
     finally:
         close_pool()

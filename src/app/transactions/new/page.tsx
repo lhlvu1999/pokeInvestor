@@ -1,20 +1,25 @@
 export const dynamic = "force-dynamic";
 
-import { asc } from "drizzle-orm";
+import { asc, desc } from "drizzle-orm";
 import { db } from "@/db/client";
-import { items, transactions } from "@/db/schema";
+import { items, marketPrices, transactions } from "@/db/schema";
 import { ButtonLink, Card, EmptyState } from "@/components/ui";
 import { NewTransactionForm } from "./NewTransactionForm";
 import { DEFAULT_TRANSACTION_CURRENCY } from "@/lib/currency";
 import { computeHoldings } from "@/lib/calc/holdings";
+import { lastBuyPerUnit } from "@/lib/calc/entry_hints";
+import { isExitReason } from "@/lib/calc/exit_reason";
 
 export default async function NewTransactionPage({
   searchParams,
 }: {
-  searchParams: Promise<{ itemId?: string; type?: string }>;
+  searchParams: Promise<{ itemId?: string; type?: string; exit?: string }>;
 }) {
   const sp = await searchParams;
-  const defaultType: "buy" | "sell" = sp.type === "sell" ? "sell" : "buy";
+  // ?exit=gifted|lost|opened opens the form as a non-sale exit.
+  const defaultExit = isExitReason(sp.exit) ? sp.exit : "sold";
+  const defaultType: "buy" | "sell" =
+    sp.type === "sell" || defaultExit !== "sold" ? "sell" : "buy";
   const allItems = await db
     .select({ id: items.id, name: items.name })
     .from(items)
@@ -32,12 +37,32 @@ export default async function NewTransactionPage({
     txByItem.set(r.itemId, list);
   }
   const itemHeld: Record<string, number> = {};
+  const itemLastBuy: Record<string, number> = {};
   for (const [itemId, list] of txByItem) {
     try {
       itemHeld[itemId] = computeHoldings(list).quantity;
     } catch {
       itemHeld[itemId] = 0;
     }
+    const last = lastBuyPerUnit(list);
+    if (last != null) itemLastBuy[itemId] = last;
+  }
+
+  // Newest market price per item, so the form can offer it as the cost.
+  // Only its currency matters for display; prices are stored in the item's
+  // transaction currency.
+  const latestPrices = await db
+    .selectDistinctOn([marketPrices.itemId], {
+      itemId: marketPrices.itemId,
+      priceCents: marketPrices.priceCents,
+      currency: marketPrices.currency,
+    })
+    .from(marketPrices)
+    .orderBy(marketPrices.itemId, desc(marketPrices.fetchedAt));
+  const itemMarket: Record<string, { priceMinor: number; currency: string }> =
+    {};
+  for (const p of latestPrices) {
+    itemMarket[p.itemId] = { priceMinor: p.priceCents, currency: p.currency };
   }
 
   return (
@@ -64,14 +89,16 @@ export default async function NewTransactionPage({
             items={allItems}
             itemCurrency={itemCurrency}
             itemHeld={itemHeld}
+            itemMarket={itemMarket}
+            itemLastBuy={itemLastBuy}
             defaultItemId={sp.itemId ?? null}
             defaultType={defaultType}
+            defaultExit={defaultExit}
             defaultCurrency={DEFAULT_TRANSACTION_CURRENCY}
           />
           <p className="text-xs text-zinc-500 mt-4">
-            Final value is the total amount for the whole transaction —
-            already including shipping/fees for buys, or net of fees for
-            sells.
+            Final value is the total amount for the whole transaction — already
+            including shipping/fees for buys, or net of fees for sells.
           </p>
         </Card>
       )}

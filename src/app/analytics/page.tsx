@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { ItemLink } from "@/components/ItemDrawer";
 import Link from "next/link";
 import { Card, EmptyState, StatCard } from "@/components/ui";
 import { Money } from "@/components/Money";
@@ -70,24 +71,16 @@ export default async function AnalyticsPage() {
         </p>
       </div>
 
-      {/* Open positions — everything below this depends on market_prices,
-          which the realized/sell-based sections further down do not. */}
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium tracking-wider uppercase text-zinc-500">
-          Open positions{" "}
-          <span className="text-xs font-normal normal-case tracking-normal text-zinc-500">
-            — what you hold is currently worth, from market prices
-          </span>
-        </h2>
-        <PriceAnalyticsSection
-          data={priceData}
-          displayCurrency={displayCurrency}
-        />
-      </section>
-
       {/* Headline stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <StatCard label="Realized (lifetime)">
+        <StatCard
+          label="Realized (lifetime)"
+          hint={
+            headline.writeOffUnits > 0
+              ? `incl. ${headline.writeOffUnits} unit${headline.writeOffUnits === 1 ? "" : "s"} gifted / lost / opened`
+              : undefined
+          }
+        >
           <Money
             amount={headline.realizedTotal}
             currency={displayCurrency}
@@ -226,12 +219,12 @@ export default async function AnalyticsPage() {
                     className="hover:bg-zinc-50 dark:hover:bg-zinc-900/40"
                   >
                     <td className="px-4 py-2">
-                      <Link
-                        href={`/items/${m.itemId}`}
+                      <ItemLink
+                        itemId={m.itemId}
                         className="font-medium hover:underline"
                       >
                         {m.itemName}
-                      </Link>
+                      </ItemLink>
                     </td>
                     <td className="px-4 py-2 text-zinc-500">
                       {m.buyDate.toLocaleDateString()}
@@ -362,12 +355,12 @@ export default async function AnalyticsPage() {
             {sameItem.map((row) => (
               <details key={row.itemId} className="px-4 py-3">
                 <summary className="cursor-pointer flex items-center justify-between gap-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/40 -mx-4 px-4 py-1.5 rounded">
-                  <Link
-                    href={`/items/${row.itemId}`}
+                  <ItemLink
+                    itemId={row.itemId}
                     className="font-medium hover:underline"
                   >
                     {row.itemName}
-                  </Link>
+                  </ItemLink>
                   <span className="text-xs text-zinc-500">
                     {row.lotCount} lot(s)
                   </span>
@@ -433,6 +426,22 @@ export default async function AnalyticsPage() {
           </div>
         )}
       </Card>
+
+      {/* Open positions — the full list. Last, because it depends on
+          market_prices while everything above is from your own sales, and
+          because the dashboard already leads with the top positions. */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium tracking-wider uppercase text-zinc-500">
+          What you hold{" "}
+          <span className="text-xs font-normal normal-case tracking-normal text-zinc-500">
+            — worth now, from market prices
+          </span>
+        </h2>
+        <PriceAnalyticsSection
+          data={priceData}
+          displayCurrency={displayCurrency}
+        />
+      </section>
     </div>
   );
 }
@@ -478,12 +487,12 @@ function ItemPerformanceTable({
               className="hover:bg-zinc-50 dark:hover:bg-zinc-900/40"
             >
               <td className="px-4 py-2">
-                <Link
-                  href={`/items/${r.itemId}`}
+                <ItemLink
+                  itemId={r.itemId}
                   className="font-medium hover:underline"
                 >
                   {r.itemName}
-                </Link>
+                </ItemLink>
               </td>
               <td className="px-4 py-2 text-right tabular-nums">
                 <span className="font-medium">{r.unitsSold}</span>

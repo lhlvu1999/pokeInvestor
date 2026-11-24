@@ -1,0 +1,10 @@
+{
+  "note": "Plain order history in US dollars. Every row is readable.",
+  "rows": [
+    { "item": "Pokémon TCG Prismatic Evolutions Elite Trainer Box", "quantity": 2, "dateIn": "2026-01-17", "amountIn": 149.98, "dateOut": null, "amountOut": null },
+    { "item": "Pokémon TCG Surging Sparks Booster Bundle", "quantity": 1, "dateIn": "2025-12-02", "amountIn": 27.5, "dateOut": null, "amountOut": null },
+    { "item": "Pokémon TCG 151 Ultra-Premium Collection", "quantity": 1, "dateIn": "2025-11-14", "amountIn": 119, "dateOut": null, "amountOut": null },
+    { "item": "Pokémon TCG Journey Together Booster Pack", "quantity": 18, "dateIn": "2025-10-30", "amountIn": 98.46, "dateOut": null, "amountOut": null }
+  ],
+  "mustOmit": []
+}

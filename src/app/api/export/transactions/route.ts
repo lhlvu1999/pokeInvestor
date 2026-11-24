@@ -25,6 +25,7 @@ export async function GET() {
       currency: transactions.currency,
       occurredAt: transactions.occurredAt,
       note: transactions.note,
+      exitReason: transactions.exitReason,
     })
     .from(transactions)
     .innerJoin(items, eq(transactions.itemId, items.id))
@@ -41,6 +42,7 @@ export async function GET() {
     "currency",
     "occurred_at",
     "note",
+    "exit_reason",
   ].join(",");
 
   const lines = rows.map((r) =>
@@ -55,6 +57,7 @@ export async function GET() {
       csvEscape(r.currency),
       csvEscape(r.occurredAt.toISOString()),
       csvEscape(r.note),
+      csvEscape(r.exitReason),
     ].join(","),
   );
 

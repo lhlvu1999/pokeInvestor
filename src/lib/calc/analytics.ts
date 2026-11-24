@@ -5,6 +5,7 @@
  */
 
 import type { Transaction } from "@/db/schema";
+import { consumeQueue, DEFAULT_COST_METHOD, type CostMethod } from "./holdings";
 
 export const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -26,6 +27,15 @@ export type SellAnalytic = {
   daysHeldAvg: number;
   /** Quantity sold. */
   quantity: number;
+  /** Stored exit reason: null for a normal sale (see calc/exit_reason). */
+  exitReason: string | null;
+  /**
+   * Where the consumed cost came from: one entry per purchase the units were
+   * taken from, with that purchase's date and the part of the cost it carries.
+   * The costs add up to `consumedCostCents`. Lets a report convert each part at
+   * the exchange rate of the day it was bought.
+   */
+  costLots: { buyDate: Date; cost: number }[];
 };
 
 export type HeldLot = {
@@ -50,7 +60,7 @@ type TxInput = Pick<
   | "currency"
   | "lotId"
   | "status"
->;
+> & { exitReason?: string | null };
 
 type QueueEntry = {
   buyTxId: string;
@@ -70,6 +80,7 @@ type QueueEntry = {
  */
 export function replayForAnalytics(
   txs: ReadonlyArray<TxInput>,
+  method: CostMethod = DEFAULT_COST_METHOD,
 ): { sells: SellAnalytic[]; remaining: QueueEntry[] } {
   if (txs.length === 0) return { sells: [], remaining: [] };
 
@@ -92,39 +103,45 @@ export function replayForAnalytics(
       });
       continue;
     }
-    // Sell — consume from the queue (lot-specific or FIFO).
-    let toSell = tx.quantity;
-    let consumedCost = 0;
-    // Weighted-days tracker.
+    // Sell — consume from the queue per the cost method. Holding period is
+    // measured over the units removed oldest-first, under either method.
     let weightedDaysSum = 0;
     let weightedQty = 0;
-
-    for (const entry of queue) {
-      if (toSell === 0) break;
-      if (entry.qty === 0) continue;
-      if (tx.lotId != null && entry.lotId !== tx.lotId) continue;
-      const take = Math.min(toSell, entry.qty);
-      const cost =
-        take === entry.qty
-          ? entry.cost
-          : Math.round((entry.cost * take) / entry.qty);
-      consumedCost += cost;
-      const days = Math.max(
-        0,
-        (tx.occurredAt.getTime() - entry.buyDate.getTime()) / MS_PER_DAY,
-      );
-      weightedDaysSum += days * take;
-      weightedQty += take;
-      entry.qty -= take;
-      entry.cost -= cost;
-      toSell -= take;
-    }
+    const takes: { buyDate: Date; take: number; cost: number }[] = [];
+    const { consumed: consumedCost } = consumeQueue(
+      queue,
+      tx.quantity,
+      tx.lotId,
+      method,
+      (entry, take) => {
+        const days = Math.max(
+          0,
+          (tx.occurredAt.getTime() - entry.buyDate.getTime()) / MS_PER_DAY,
+        );
+        weightedDaysSum += days * take;
+        weightedQty += take;
+        // Called before the entry is reduced. Under FIFO this is exactly the
+        // cost taken from it; under the average method the cost is shared out
+        // after the loop, because every unit costs the same.
+        takes.push({
+          buyDate: entry.buyDate,
+          take,
+          cost:
+            take === entry.qty
+              ? entry.cost
+              : Math.round((entry.cost * take) / entry.qty),
+        });
+      },
+    );
+    const costLots = costLotsOf(takes, consumedCost, method);
     // If the sell can't be fully satisfied here we simply emit what we can —
     // computeHoldings's stricter validation is the source of truth for
     // rejecting bad timelines. Analytics is best-effort.
 
     const marginPct =
-      consumedCost === 0 ? null : ((tx.finalValueCents - consumedCost) / consumedCost) * 100;
+      consumedCost === 0
+        ? null
+        : ((tx.finalValueCents - consumedCost) / consumedCost) * 100;
     const daysHeldAvg = weightedQty > 0 ? weightedDaysSum / weightedQty : 0;
 
     sells.push({
@@ -136,10 +153,37 @@ export function replayForAnalytics(
       marginPct,
       daysHeldAvg,
       quantity: tx.quantity,
+      exitReason: tx.exitReason ?? null,
+      costLots,
     });
   }
 
   return { sells, remaining: queue.filter((e) => e.qty > 0) };
+}
+
+/**
+ * Split a sale's consumed cost over the purchases it came from. FIFO knows the
+ * cost of each part exactly. The average method costs every unit the same, so
+ * the total is shared out by units, with the rounding left over going to the
+ * last part so the pieces always add up to the whole.
+ */
+export function costLotsOf(
+  takes: ReadonlyArray<{ buyDate: Date; take: number; cost: number }>,
+  consumed: number,
+  method: CostMethod,
+): { buyDate: Date; cost: number }[] {
+  if (takes.length === 0) return [];
+  if (method !== "average") {
+    return takes.map((t) => ({ buyDate: t.buyDate, cost: t.cost }));
+  }
+  const units = takes.reduce((n, t) => n + t.take, 0);
+  let left = consumed;
+  return takes.map((t, i) => {
+    const share =
+      i === takes.length - 1 ? left : Math.round((consumed * t.take) / units);
+    left -= share;
+    return { buyDate: t.buyDate, cost: share };
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -183,8 +227,23 @@ export function makeHistogram(
   return buckets;
 }
 
-export const DAYS_HELD_EDGES = [0, 7, 30, 90, 180, 365, Number.POSITIVE_INFINITY];
-export const DAYS_HELD_LABELS = ["0–7d", "7–30d", "30–90d", "90–180d", "180–365d", "365d+"];
+export const DAYS_HELD_EDGES = [
+  0,
+  7,
+  30,
+  90,
+  180,
+  365,
+  Number.POSITIVE_INFINITY,
+];
+export const DAYS_HELD_LABELS = [
+  "0–7d",
+  "7–30d",
+  "30–90d",
+  "90–180d",
+  "180–365d",
+  "365d+",
+];
 
 export const MARGIN_PCT_EDGES = [
   Number.NEGATIVE_INFINITY,

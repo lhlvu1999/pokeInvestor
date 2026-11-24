@@ -15,10 +15,12 @@ import { ItemThumb } from "./ItemThumb";
 export function GlobalSearch() {
   const router = useRouter();
   const [q, setQ] = useState("");
-  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [found, setHits] = useState<SearchHit[]>([]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [loading, setLoading] = useState(false);
+  // Short queries show nothing; derived here so no effect has to clear state.
+  const hits = q.trim().length >= 2 ? found : [];
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -46,12 +48,7 @@ export function GlobalSearch() {
 
   // Debounced search — 150ms feels responsive without hammering the DB.
   useEffect(() => {
-    if (q.trim().length < 2) {
-      setHits([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (q.trim().length < 2) return;
     const handle = setTimeout(async () => {
       try {
         const rows = await searchItems(q);
@@ -98,6 +95,7 @@ export function GlobalSearch() {
         value={q}
         onChange={(e) => {
           setQ(e.target.value);
+          setLoading(e.target.value.trim().length >= 2);
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}

@@ -2,7 +2,6 @@
 name = "poke-pipeline"
 version = "0.1.0"
 description = "YouTube transcript + LLM extraction pipeline for the Pokémon investor app."
-readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = { text = "Proprietary" }
 authors = [{ name = "poke-investor maintainers" }]
@@ -19,6 +18,7 @@ dependencies = [
     "typer>=0.12.5",
     "yt-dlp>=2025.1.15",
     "youtube-transcript-api>=0.6.2",
+    "py7zr>=0.22",
 ]
 
 [project.scripts]

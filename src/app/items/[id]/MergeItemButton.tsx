@@ -18,10 +18,13 @@ export function MergeItemButton({
   sourceId,
   sourceName,
   targets,
+  variant = "link",
 }: {
   sourceId: string;
   sourceName: string;
   targets: Target[];
+  /** "menu" renders as a full-width row for use inside a MoreMenu. */
+  variant?: "link" | "menu";
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -79,7 +82,12 @@ export function MergeItemButton({
           setOpen(true);
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
-        className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 underline underline-offset-2"
+        role={variant === "menu" ? "menuitem" : undefined}
+        className={
+          variant === "menu"
+            ? "w-full text-left rounded-md px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            : "text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 underline underline-offset-2"
+        }
       >
         Merge into…
       </button>
@@ -87,7 +95,13 @@ export function MergeItemButton({
   }
 
   return (
-    <div className="inline-flex flex-col gap-2 border border-zinc-300 dark:border-zinc-700 rounded p-2 bg-white dark:bg-zinc-900 w-72">
+    <div
+      className={`flex flex-col gap-2 rounded p-2 bg-white dark:bg-zinc-900 ${
+        variant === "menu"
+          ? "w-full"
+          : "inline-flex w-72 border border-zinc-300 dark:border-zinc-700"
+      }`}
+    >
       <div className="text-xs text-zinc-500">
         Merge <span className="font-medium">{sourceName}</span> into…
       </div>

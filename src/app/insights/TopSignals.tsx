@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { ItemLink } from "@/components/ItemDrawer";
 import { Card } from "@/components/ui";
 import type { Signal } from "@/lib/server/signals";
 import { describeLabel, type SignalLabel } from "@/lib/signals-shared";
@@ -27,12 +27,12 @@ function SignalRow({ signal: s }: { signal: Signal }) {
         <div className="flex-1 min-w-[200px]">
           <div className="flex items-center gap-2 flex-wrap">
             {s.itemId ? (
-              <Link
-                href={`/items/${s.itemId}`}
+              <ItemLink
+                itemId={s.itemId}
                 className="font-medium hover:underline"
               >
                 {s.displayName}
-              </Link>
+              </ItemLink>
             ) : (
               <span className="font-medium">{s.displayName}</span>
             )}

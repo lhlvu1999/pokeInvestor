@@ -83,46 +83,68 @@ export function ChatUI() {
     setInput("");
   }
 
+  const empty = messages.length === 0;
+
   return (
-    <div className="flex flex-col gap-4 h-[calc(100vh-14rem)] max-w-4xl">
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto rounded border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-4 flex flex-col gap-4"
-      >
-        {messages.length === 0 && (
-          <div className="flex flex-col gap-3">
-            <div className="text-sm text-zinc-600 dark:text-zinc-400">
-              Ask anything about your portfolio. The model can run read-only SQL
-              against your database. Try:
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => send(s)}
-                  className="text-xs px-2 py-1 rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+    <div
+      className={`flex flex-col gap-4 w-full max-w-3xl mx-auto ${
+        // Only claim the full height once there is a conversation to
+        // scroll; an empty chat should be a compact welcome, not a hollow box.
+        empty ? "" : "h-[calc(100vh-14rem)]"
+      }`}
+    >
+      {empty ? (
+        <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 sm:p-6">
+          <h2 className="text-base font-medium">What do you want to know?</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Ask in plain English. The model writes read-only SQL against your
+            own data and shows you the queries it ran.
+          </p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {SUGGESTIONS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => send(s)}
+                className="group text-left text-sm rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-2.5 hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors flex items-start justify-between gap-2"
+              >
+                <span>{s}</span>
+                <span
+                  aria-hidden
+                  className="text-zinc-400 group-hover:text-zinc-700 dark:group-hover:text-zinc-200 transition-colors"
                 >
-                  {s}
-                </button>
-              ))}
+                  →
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-4 flex flex-col gap-4"
+        >
+          {messages.map((m, i) => (
+            <MessageBubble key={i} message={m} />
+          ))}
+          {pending && (
+            <div className="text-xs text-zinc-500 italic">
+              Thinking… (local models take 10–30s)
             </div>
-          </div>
-        )}
-        {messages.map((m, i) => (
-          <MessageBubble key={i} message={m} />
-        ))}
-        {pending && (
-          <div className="text-xs text-zinc-500 italic">
-            Thinking… (local models take 10–30s)
-          </div>
-        )}
-        {error && (
-          <div className="text-sm rounded border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 p-2 text-rose-700 dark:text-rose-300">
-            {error}
-          </div>
-        )}
-      </div>
+          )}
+          {error && (
+            <div className="text-sm rounded border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 p-2 text-rose-700 dark:text-rose-300">
+              {error}
+            </div>
+          )}
+        </div>
+      )}
+      {/* An error before the first reply still needs somewhere to show. */}
+      {empty && error && (
+        <div className="text-sm rounded border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 p-2 text-rose-700 dark:text-rose-300">
+          {error}
+        </div>
+      )}
 
       <form
         onSubmit={(e) => {

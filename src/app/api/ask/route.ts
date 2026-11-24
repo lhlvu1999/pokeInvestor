@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runChat, type ChatMessage } from "@/lib/server/chat";
+import { refuseCrossSite } from "@/lib/server/auth";
 
 /**
  * POST /api/ask
@@ -12,6 +13,8 @@ import { runChat, type ChatMessage } from "@/lib/server/chat";
  * spinner.
  */
 export async function POST(req: Request) {
+  const refused = refuseCrossSite(req);
+  if (refused) return refused;
   let body: { messages?: ChatMessage[] } = {};
   try {
     body = await req.json();

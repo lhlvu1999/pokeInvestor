@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export default function AskPage() {
   return (
     <div className="flex flex-col gap-4">
-      <div>
+      <div className="w-full max-w-3xl mx-auto">
         <h1 className="text-2xl font-semibold">Ask your portfolio</h1>
         <p className="text-xs text-zinc-500 mt-1">
           Natural-language questions over your items, transactions, market

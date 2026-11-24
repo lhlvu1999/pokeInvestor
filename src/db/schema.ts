@@ -13,6 +13,7 @@ import {
   primaryKey,
   boolean,
   jsonb,
+  date,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
@@ -56,6 +57,53 @@ export const items = pgTable(
      * e.g. `Zekrom ex 210/193 PSA 10 -RGS -CGC -BGS`.
      */
     ebayQuery: text("ebay_query"),
+    /**
+     * The catalogue product this item is (TCGplayer product id), set from the
+     * Catalogue → Link items screen. Null = not linked yet. Only sealed
+     * products are linked, so `catalog_products.kind = 'sealed'`.
+     */
+    catalogProductId: bigint("catalog_product_id", {
+      mode: "number",
+    }).references(() => catalogProducts.productId, { onDelete: "set null" }),
+    /** The person decided this item isn't in the catalogue (a slab, a promo). */
+    /**
+     * For a graded slab: the catalogue CARD it is a picture of, matched by card
+     * number, language and name. Separate from `catalog_product_id` (a sealed
+     * product) so no sealed-product analysis is affected. The daily sync keeps
+     * this card's price, which is what lets a slab be compared with a raw card.
+     */
+    rawCardProductId: bigint("raw_card_product_id", { mode: "number" }).references(
+      () => catalogProducts.productId,
+      { onDelete: "set null" },
+    ),
+    /** The person said the matched card is wrong; do not match this slab again. */
+    rawCardSkipped: boolean("raw_card_skipped").notNull().default(false),
+    catalogLinkSkipped: boolean("catalog_link_skipped")
+      .notNull()
+      .default(false),
+    /**
+     * Who decided the catalogue link state. null = nobody yet, so the daily
+     * sync may link a clear match; 'auto' = the sync linked it; 'manual' =
+     * the person linked or skipped it; 'declined' = the person removed a
+     * link. The sync only ever acts on null, so it never overrides a person.
+     */
+    catalogLinkSource: text("catalog_link_source"),
+    /**
+     * Sell target: tell me when this item's market price reaches this much
+     * (minor units of `sellTargetCurrency`). Null = no target. Only held
+     * items are alerted on; the pipeline's daily check compares it with the
+     * newest market price in the same currency.
+     */
+    sellTargetCents: integer("sell_target_cents"),
+    sellTargetCurrency: varchar("sell_target_currency", { length: 3 }),
+    /**
+     * Set when the pipeline alerted that the market price reached the target.
+     * Cleared when the price falls back below it (so the next climb alerts
+     * again) and whenever the target is changed.
+     */
+    sellTargetAlertedAt: timestamp("sell_target_alerted_at", {
+      withTimezone: true,
+    }),
     /**
      * Free-form lowercase tags for grouping items (e.g. "etb", "slab",
      * "booster box"). Stored as a Postgres text array. Indexed for fast
@@ -125,6 +173,12 @@ export const transactions = pgTable(
      * effectively received.
      */
     status: transactionStatusEnum("status").notNull().default("received"),
+    /**
+     * Why a sell removed stock: null = a normal sale; otherwise 'gifted',
+     * 'lost' or 'opened' (see lib/calc/exit_reason). Always null on buys.
+     * These still count in realized profit but not in sale statistics.
+     */
+    exitReason: text("exit_reason"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -134,6 +188,46 @@ export const transactions = pgTable(
     index("transactions_lot_idx").on(t.lotId),
   ],
 );
+
+/**
+ * Safety net for deleted transactions. A delete removes the row from
+ * `transactions` (so no query anywhere has to know about "soft deleted"
+ * rows) and keeps a JSON copy here for a while, so it can be restored from
+ * History's "Recently deleted" list after the undo toast is gone.
+ *
+ * `id` is the original transaction id. Rows disappear with their item.
+ */
+export const deletedTransactions = pgTable(
+  "deleted_transactions",
+  {
+    id: uuid("id").primaryKey(),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    snapshot: jsonb("snapshot").notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("deleted_transactions_deleted_at_idx").on(t.deletedAt)],
+);
+
+/**
+ * A picture the person uploaded for an item, shrunk in the browser first (a few
+ * tens of KB). Kept apart from `items` so lists don't carry image bytes; the
+ * item's `image_url` points at /api/items/:id/image. Gone when the item is.
+ */
+export const itemImages = pgTable("item_images", {
+  itemId: uuid("item_id")
+    .primaryKey()
+    .references(() => items.id, { onDelete: "cascade" }),
+  contentType: text("content_type").notNull(),
+  /** The image bytes, base64 encoded. */
+  dataBase64: text("data_base64").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
 
 /**
  * Time-series of market price snapshots per item. Designed to support future
@@ -169,6 +263,22 @@ export const appSettings = pgTable("app_settings", {
 });
 
 /**
+ * Exchange rates as they were on past days, for reports about past sales. One
+ * row per day and currency, as "units of `quote` per 1 USD" (the base is always
+ * USD; any pair is worked out through it). Past rates never change, so a row is
+ * kept for good once fetched. Separate from `fx_rates`, which holds today's.
+ */
+export const fxHistory = pgTable(
+  "fx_history",
+  {
+    day: date("day").notNull(),
+    quote: varchar("quote", { length: 3 }).notNull(),
+    rate: doublePrecision("rate").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.day, t.quote] })],
+);
+
+/**
  * Cached spot FX rates fetched from the public exchange-rate API.
  * Composite key (base, quote). `rate` is `quote per 1 base`.
  */
@@ -183,6 +293,113 @@ export const fxRates = pgTable(
       .notNull(),
   },
   (t) => [primaryKey({ columns: [t.base, t.quote] })],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalogue (English + Japanese Pokémon sets and sealed products)
+//
+// Written by the Python pipeline's `catalog-sync` command from the public
+// TCGCSV mirror of TCGplayer; the Next.js app only reads these tables, apart
+// from `items.catalog_product_id`, which the "Link items" screen sets.
+//
+// Prices are TCGplayer's market price in US cents. Individual card prices are
+// NOT stored: a set keeps only its total, top-10 and top-20 value per day, and
+// its top-20 cards weekly. Full detail for one set is fetched live on demand.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const catalogSets = pgTable(
+  "catalog_sets",
+  {
+    /** TCGplayer groupId. */
+    groupId: bigint("group_id", { mode: "number" }).primaryKey(),
+    /** TCGplayer category: 3 = Pokémon (English), 85 = Pokémon Japan. */
+    categoryId: integer("category_id").notNull(),
+    language: text("language").notNull(), // 'en' | 'ja'
+    name: text("name").notNull(),
+    abbreviation: text("abbreviation"),
+    publishedOn: timestamp("published_on", {
+      withTimezone: false,
+      mode: "date",
+    }),
+    /** When this set's product list was last fetched. */
+    productsSyncedAt: timestamp("products_synced_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("catalog_sets_language_idx").on(t.language, t.publishedOn)],
+);
+
+export const catalogProducts = pgTable(
+  "catalog_products",
+  {
+    /** TCGplayer productId. */
+    productId: bigint("product_id", { mode: "number" }).primaryKey(),
+    groupId: bigint("group_id", { mode: "number" })
+      .notNull()
+      .references(() => catalogSets.groupId, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(), // 'sealed' | 'card'
+    rarity: text("rarity"),
+    cardNumber: text("card_number"),
+    imageUrl: text("image_url"),
+    url: text("url"),
+  },
+  (t) => [index("catalog_products_group_idx").on(t.groupId, t.kind)],
+);
+
+/** Daily market price of each SEALED product, in US cents. */
+export const catalogPrices = pgTable(
+  "catalog_prices",
+  {
+    productId: bigint("product_id", { mode: "number" })
+      .notNull()
+      .references(() => catalogProducts.productId, { onDelete: "cascade" }),
+    day: timestamp("day", { withTimezone: false, mode: "date" }).notNull(),
+    marketCents: integer("market_cents"),
+    lowCents: integer("low_cents"),
+    midCents: integer("mid_cents"),
+    highCents: integer("high_cents"),
+  },
+  (t) => [primaryKey({ columns: [t.productId, t.day] })],
+);
+
+/**
+ * Per-set daily totals. A card counts at its highest market price across its
+ * printings (normal, holo, reverse…): "one of each card, best version".
+ */
+export const catalogSetDaily = pgTable(
+  "catalog_set_daily",
+  {
+    groupId: bigint("group_id", { mode: "number" })
+      .notNull()
+      .references(() => catalogSets.groupId, { onDelete: "cascade" }),
+    day: timestamp("day", { withTimezone: false, mode: "date" }).notNull(),
+    cardCount: integer("card_count").notNull(),
+    pricedCount: integer("priced_count").notNull(),
+    totalCents: bigint("total_cents", { mode: "number" }).notNull(),
+    top10Cents: bigint("top10_cents", { mode: "number" }).notNull(),
+    top20Cents: bigint("top20_cents", { mode: "number" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.groupId, t.day] })],
+);
+
+/** A set's twenty most valuable cards, snapshotted weekly. */
+export const catalogSetTop = pgTable(
+  "catalog_set_top",
+  {
+    groupId: bigint("group_id", { mode: "number" })
+      .notNull()
+      .references(() => catalogSets.groupId, { onDelete: "cascade" }),
+    day: timestamp("day", { withTimezone: false, mode: "date" }).notNull(),
+    rank: integer("rank").notNull(),
+    productId: bigint("product_id", { mode: "number" })
+      .notNull()
+      .references(() => catalogProducts.productId, { onDelete: "cascade" }),
+    marketCents: integer("market_cents").notNull(),
+    variant: text("variant"),
+  },
+  (t) => [primaryKey({ columns: [t.groupId, t.day, t.rank] })],
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -486,6 +703,20 @@ export const watchlistItems = pgTable(
      * bought it, or a market_price crossed the target. Null while
      * still active. */
     hitAt: timestamp("hit_at", { withTimezone: true }),
+    /** Set when the pipeline's daily check alerted that the linked item's
+     * market price reached `targetBuyPriceCents`. Separate from `hitAt`
+     * on purpose: `hitAt` retires the entry from the active list, whereas
+     * a price alert is only a notification — the entry stays on the
+     * watchlist until you buy it. Cleared again when the price climbs back
+     * above the target, so the next dip alerts afresh. */
+    targetAlertedAt: timestamp("target_alerted_at", { withTimezone: true }),
+    /** Opt-in: tell me when this product reaches the age at which earlier
+     * launches of its kind have typically been at their lowest price. Needs
+     * the entry linked to an item that is linked to the catalogue. */
+    stageAlert: boolean("stage_alert").notNull().default(false),
+    /** Set when the pipeline sent that alert; it fires once per product,
+     * because a product only ever gets older. */
+    stageAlertedAt: timestamp("stage_alerted_at", { withTimezone: true }),
   },
   (t) => [
     index("watchlist_items_item_idx").on(t.itemId),
@@ -592,6 +823,8 @@ export type MarketPrice = typeof marketPrices.$inferSelect;
 export type NewMarketPrice = typeof marketPrices.$inferInsert;
 export type AppSetting = typeof appSettings.$inferSelect;
 export type FxRate = typeof fxRates.$inferSelect;
+export type CatalogSet = typeof catalogSets.$inferSelect;
+export type CatalogProduct = typeof catalogProducts.$inferSelect;
 export type TransactionType = (typeof transactionTypeEnum.enumValues)[number];
 export type TransactionStatus =
   (typeof transactionStatusEnum.enumValues)[number];

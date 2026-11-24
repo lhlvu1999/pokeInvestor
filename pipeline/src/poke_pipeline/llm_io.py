@@ -164,11 +164,7 @@ def _describe_object(schema: dict[str, Any], *, indent: int) -> list[str]:
 
 def _is_object(spec: dict[str, Any]) -> bool:
     t = spec.get("type")
-    if t == "object":
-        return True
-    if isinstance(t, list) and "object" in t:
-        return True
-    return False
+    return t == "object" or (isinstance(t, list) and "object" in t)
 
 
 def _type_label(spec: dict[str, Any]) -> str:

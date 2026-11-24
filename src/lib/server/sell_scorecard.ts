@@ -21,7 +21,6 @@ import {
   youtubeInsights,
   youtubeVideos,
 } from "@/db/schema";
-import { computeHoldings } from "@/lib/calc/holdings";
 import type { ConvertedItemValues } from "@/lib/calc/portfolio";
 import type { ItemWithValuation } from "./items";
 

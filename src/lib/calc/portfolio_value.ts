@@ -6,11 +6,16 @@
  *
  * Currency-per-item is preserved through the calc; conversion to a single
  * display currency happens in the server layer (mirrors the pattern used
- * by `getMonthlyCashflow`).
+ * by `getCashflowLines`).
  */
 
 import type { MarketPrice, Transaction } from "@/db/schema";
-import { computeHoldings, valueHoldings } from "./holdings";
+import {
+  computeHoldings,
+  DEFAULT_COST_METHOD,
+  valueHoldings,
+  type CostMethod,
+} from "./holdings";
 
 export type NativeSnapshotBucket = {
   /** ISO 4217 currency code shared by every item contributing to this bucket. */
@@ -64,6 +69,7 @@ export function computePortfolioSnapshots(
   txsByItem: ReadonlyMap<string, TxLike[]>,
   pricesByItem: ReadonlyMap<string, PriceLike[]>,
   itemCurrencyById: ReadonlyMap<string, string>,
+  method: CostMethod = DEFAULT_COST_METHOD,
 ): PortfolioSnapshot[] {
   // Pre-sort every price list once so `latestPriceOnOrBefore` can bisect.
   const sortedPrices = new Map<string, PriceLike[]>();
@@ -96,7 +102,7 @@ export function computePortfolioSnapshots(
       );
       if (filtered.length === 0) continue;
 
-      const snap = computeHoldings(filtered);
+      const snap = computeHoldings(filtered, method);
       if (snap.quantity === 0) continue;
       itemsHeld += 1;
 

@@ -12,13 +12,16 @@ import { Money } from "@/components/Money";
 import { ButtonLink, Card, EmptyState, StatCard } from "@/components/ui";
 import { MarketPriceForm } from "./MarketPriceForm";
 import { DeleteTransactionButton } from "./DeleteTransactionButton";
+import { MoreMenu } from "@/components/MoreMenu";
 import { DeleteItemButton } from "./DeleteItemButton";
+import { displayExitReason, EXIT_REASON_LABELS } from "@/lib/calc/exit_reason";
 import { MergeItemButton } from "./MergeItemButton";
 import { RefreshPriceButton } from "./RefreshPriceButton";
 import { EbayPricePanel } from "./EbayPricePanel";
 import { PriceHistoryChart } from "@/components/PriceHistoryChart";
 import { getItemPriceHistory } from "@/lib/server/price_analytics";
 import { RenameItemForm } from "./RenameItemForm";
+import { ImageEditor } from "./ImageEditor";
 import { TagEditor } from "./TagEditor";
 import { MarkReceivedButton } from "./MarkReceivedButton";
 import { InlineShipping } from "./InlineShipping";
@@ -28,14 +31,33 @@ import {
   getItemInsightSummary,
   listMentionsForItem,
 } from "@/lib/server/insights";
-import { DEFAULT_TRANSACTION_CURRENCY } from "@/lib/currency";
+import {
+  DEFAULT_TRANSACTION_CURRENCY,
+  convertMinor,
+  formatAmount,
+  type CurrencyCode,
+} from "@/lib/currency";
+import { getItemCatalogInfo } from "@/lib/server/catalog_item";
+import { getLifecycles } from "@/lib/server/catalog_lifecycle";
+import { LifecycleCard } from "@/components/LifecycleCard";
+import { ReturnBasisCard } from "@/components/ReturnBasisCard";
+import { sellTargetStanding } from "@/lib/calc/sell_target";
+import { SellTargetCard } from "./SellTargetCard";
+import { BASES, parseBasis, type Basis } from "@/lib/calc/position_return";
+import { getItemReturns } from "@/lib/server/position_returns";
+import { getRate } from "@/lib/fx";
+import { summarizeItem, type SummaryLine } from "@/lib/calc/item_summary";
+import { priceMoveInWindow, windowBounds } from "@/lib/calc/changes";
 
 export default async function ItemDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params;
+  const basis = parseBasis((await searchParams).basis);
   const detail = await getItemDetail(id);
   if (!detail) notFound();
   const { item, valuation, latestPrice, transactions: txs } = detail;
@@ -58,16 +80,91 @@ export default async function ItemDetailPage({
     getItemPriceHistory(id),
   ]);
 
+  // Linked catalogue product (TCGplayer price), if the item has been linked.
+  const catalogInfo =
+    item.catalogProductId != null
+      ? await getItemCatalogInfo(item.catalogProductId).catch(() => null)
+      : null;
+  // Annualized return on each starting basis.
+  const returns = await getItemReturns(id, new Date()).catch(() => null);
+  const basisHrefs = Object.fromEntries(
+    BASES.map((b) => [b, b === "purchase" ? `/items/${id}` : `/items/${id}?basis=${b}`]),
+  ) as Record<Basis, string>;
+
+  // Where that product is in its life, set against earlier sets.
+  const lifecycle =
+    item.catalogProductId != null
+      ? ((
+          await getLifecycles([item.catalogProductId]).catch(() => null)
+        )?.get(Number(item.catalogProductId)) ?? null)
+      : null;
+  let usdToItem: number | null = null;
+  if (catalogInfo?.latest) {
+    try {
+      usdToItem =
+        itemCurrency === "USD"
+          ? 1
+          : (await getRate("USD", itemCurrency as CurrencyCode)).rate;
+    } catch {
+      usdToItem = null;
+    }
+  }
+
+  // Plain-English summary, from numbers already on this page.
+  const now = new Date();
+  const boughtUnits = txs.reduce(
+    (n, t) => (t.type === "buy" ? n + t.quantity : n),
+    0,
+  );
+  const exitUnits = txs.reduce(
+    (n, t) =>
+      t.type === "sell" && displayExitReason(t.exitReason) !== "sold"
+        ? n + t.quantity
+        : n,
+    0,
+  );
+  const { start, end } = windowBounds("week", now);
+  const weekMove = priceMoveInWindow(priceHistory.points, start, end);
+  const summaryLines = summarizeItem({
+    held: valuation.quantity,
+    pending: valuation.pendingQuantity,
+    boughtUnits,
+    soldUnits: valuation.soldQuantity,
+    exitUnits,
+    avgCost: valuation.avgCostCents,
+    inventoryCost: valuation.inventoryCostCents,
+    marketPrice: latestPrice?.priceCents ?? null,
+    priceAgeDays: latestPrice
+      ? Math.max(0, now.getTime() - latestPrice.fetchedAt.getTime()) /
+        86_400_000
+      : null,
+    weekChangePct: weekMove.kind === "moved" ? weekMove.move.changePct : null,
+    realized: valuation.realizedProfitCents,
+    unrealized: valuation.unrealizedProfitCents,
+    mentions:
+      insightSummary.total > 0
+        ? {
+            total: insightSummary.total,
+            bullish: insightSummary.bullish,
+            bearish: insightSummary.bearish,
+            channels: insightSummary.distinctChannels,
+          }
+        : null,
+    money: (minor) => formatAmount(minor, itemCurrency),
+  });
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="flex items-start gap-4 min-w-0">
-          <ItemThumb
-            imageUrl={item.imageUrl}
-            name={item.name}
-            size={96}
-            className="mt-1"
-          />
+          <div className="flex flex-col items-start gap-1 mt-1">
+            <ItemThumb
+              imageUrl={item.imageUrl}
+              name={item.name}
+              size={96}
+            />
+            <ImageEditor id={item.id} hasImage={!!item.imageUrl} />
+          </div>
           <div>
             <Link
               href="/items"
@@ -125,20 +222,92 @@ export default async function ItemDetailPage({
           <ButtonLink href={`/transactions/new?itemId=${item.id}&type=sell`}>
             Log sell
           </ButtonLink>
-          <DeleteItemButton
-            id={item.id}
-            name={item.name}
-            txCount={txs.length}
-          />
+          {/* Rare and destructive actions live one click further away. */}
+          <MoreMenu>
+            {valuation.quantity > 0 &&
+              (
+                [
+                  ["gifted", "Gift away…"],
+                  ["lost", "Mark lost / damaged…"],
+                  ["opened", "Mark opened…"],
+                ] as const
+              ).map(([r, label]) => (
+                <Link
+                  key={r}
+                  role="menuitem"
+                  href={`/transactions/new?itemId=${item.id}&exit=${r}`}
+                  className="rounded-md px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  {label}
+                </Link>
+              ))}
+            <MergeItemButton
+              variant="menu"
+              sourceId={item.id}
+              sourceName={item.name}
+              targets={otherItems}
+            />
+            <DeleteItemButton
+              variant="menu"
+              id={item.id}
+              name={item.name}
+              txCount={txs.length}
+            />
+          </MoreMenu>
         </div>
       </div>
-      <div className="flex justify-end">
-        <MergeItemButton
-          sourceId={item.id}
-          sourceName={item.name}
-          targets={otherItems}
+
+      <PlainEnglish lines={summaryLines} />
+
+      {catalogInfo && (
+        <CatalogCard
+          info={catalogInfo}
+          itemCurrency={itemCurrency}
+          usdToItem={usdToItem}
+          ebayPriceMinor={latestPrice?.priceCents ?? null}
         />
-      </div>
+      )}
+
+      {returns && returns.results.purchase.status !== "unavailable" && (
+        <ReturnBasisCard
+          results={returns.results}
+          basis={basis}
+          hrefs={basisHrefs}
+          currency={returns.currency}
+          vsIndex={returns.vsIndex}
+          benchLabel={returns.benchLabel}
+        />
+      )}
+
+      {lifecycle && (
+        <LifecycleCard
+          lifecycle={lifecycle}
+          releasedOn={lifecycle.releasedOn}
+        />
+      )}
+
+      <SellTargetCard
+        itemId={item.id}
+        currency={itemCurrency}
+        targetCents={item.sellTargetCents}
+        standing={sellTargetStanding({
+          targetCents: item.sellTargetCents,
+          targetCurrency: item.sellTargetCurrency,
+          priceCents: latestPrice?.priceCents ?? null,
+          priceCurrency: latestPrice?.currency ?? null,
+        })}
+        alertedLabel={
+          item.sellTargetAlertedAt
+            ? item.sellTargetAlertedAt.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+                timeZone: "UTC",
+              })
+            : null
+        }
+        held={valuation.quantity}
+      />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         <StatCard label="Held">
@@ -261,10 +430,19 @@ export default async function ItemDetailPage({
                                 className={
                                   tx.type === "buy"
                                     ? "text-emerald-600 dark:text-emerald-400"
-                                    : "text-rose-600 dark:text-rose-400"
+                                    : displayExitReason(tx.exitReason) ===
+                                        "sold"
+                                      ? "text-rose-600 dark:text-rose-400"
+                                      : "text-amber-600 dark:text-amber-400"
                                 }
                               >
-                                {tx.type === "buy" ? "Buy" : "Sell"}
+                                {tx.type === "buy"
+                                  ? "Buy"
+                                  : displayExitReason(tx.exitReason) === "sold"
+                                    ? "Sell"
+                                    : EXIT_REASON_LABELS[
+                                        displayExitReason(tx.exitReason)
+                                      ]}
                               </span>
                               {isPending && (
                                 <span className="inline-flex items-center rounded-full border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
@@ -388,5 +566,147 @@ export default async function ItemDetailPage({
         summary={insightSummary}
       />
     </div>
+  );
+}
+
+/**
+ * The page's numbers, said in words. Sits above the stat cards so someone
+ * who doesn't read a grid of figures still gets the picture first.
+ */
+function PlainEnglish({ lines }: { lines: SummaryLine[] }) {
+  if (lines.length === 0) return null;
+  const groups = [0, 1, 2]
+    .map((g) => lines.filter((l) => l.group === g))
+    .filter((g) => g.length > 0);
+  return (
+    <Card className="p-4">
+      <h2 className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">
+        In plain English
+      </h2>
+      <div className="mt-2 flex flex-col gap-2 text-sm leading-relaxed max-w-prose">
+        {groups.map((g, i) => (
+          <p key={i}>
+            {g.map((l, j) => (
+              <span
+                key={j}
+                className={
+                  l.warn ? "text-amber-700 dark:text-amber-400" : undefined
+                }
+              >
+                {j > 0 ? " " : ""}
+                {l.text}
+              </span>
+            ))}
+          </p>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+const usdText = (cents: number) =>
+  `$${(cents / 100).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+/**
+ * The linked catalogue product and its TCGplayer market price, set beside
+ * the item's own (eBay) price so the two can be compared at a glance.
+ */
+function CatalogCard({
+  info,
+  itemCurrency,
+  usdToItem,
+  ebayPriceMinor,
+}: {
+  info: NonNullable<Awaited<ReturnType<typeof getItemCatalogInfo>>>;
+  itemCurrency: string;
+  usdToItem: number | null;
+  ebayPriceMinor: number | null;
+}) {
+  const latest = info.latest;
+  const change =
+    latest && info.prior && info.prior.marketCents > 0
+      ? latest.marketCents / info.prior.marketCents - 1
+      : null;
+  const days =
+    latest && info.prior
+      ? Math.round(
+          (latest.day.getTime() - info.prior.day.getTime()) / 86_400_000,
+        )
+      : null;
+  const inItem =
+    latest && usdToItem != null
+      ? convertMinor(latest.marketCents, "USD", itemCurrency, usdToItem)
+      : null;
+  const asOf = latest?.day.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  const vsEbay =
+    ebayPriceMinor != null && inItem != null && inItem > 0
+      ? (ebayPriceMinor / inItem - 1) * 100
+      : null;
+  return (
+    <Card className="p-4">
+      <h2 className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">
+        Catalogue price (TCGplayer)
+      </h2>
+      <div className="mt-1.5 text-sm">
+        <span className="font-medium">{info.name}</span>{" "}
+        <span className="text-zinc-500">
+          · {info.setName} · {info.language === "ja" ? "Japanese" : "English"}
+        </span>
+      </div>
+      {latest ? (
+        <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <span className="text-2xl font-semibold tabular-nums">
+            {usdText(latest.marketCents)}
+          </span>
+          {inItem != null && (
+            <span className="text-sm text-zinc-500 tabular-nums">
+              ≈ <Money amount={inItem} currency={itemCurrency} />
+            </span>
+          )}
+          {change != null && days != null && (
+            <span
+              className={`text-sm tabular-nums ${
+                change > 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : change < 0
+                    ? "text-rose-600 dark:text-rose-400"
+                    : "text-zinc-500"
+              }`}
+            >
+              {change > 0 ? "+" : change < 0 ? "−" : ""}
+              {Math.abs(change * 100).toFixed(1)}% over {days} days
+            </span>
+          )}
+        </div>
+      ) : (
+        <p className="mt-2 text-sm text-zinc-500">
+          TCGplayer has no market price for this product yet.
+        </p>
+      )}
+      <p className="mt-2 text-xs text-zinc-500">
+        {asOf ? `As of ${asOf}. ` : ""}
+        {vsEbay != null
+          ? `Your eBay price is ${Math.abs(vsEbay).toFixed(0)}% ${vsEbay >= 0 ? "above" : "below"} it. `
+          : ""}
+        {info.url && (
+          <a
+            href={info.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:no-underline"
+          >
+            View on TCGplayer ↗
+          </a>
+        )}
+      </p>
+    </Card>
   );
 }

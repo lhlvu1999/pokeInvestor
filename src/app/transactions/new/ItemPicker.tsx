@@ -13,12 +13,15 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createItem } from "@/lib/server/items";
 import { useToast } from "@/components/Toast";
+import { formatAmount } from "@/lib/currency";
 
 export type PickerOption = {
   id: string;
   name: string;
   currency: string; // from most-recent tx; used to warn on mismatch
   held: number;
+  /** Latest market price per unit in `currency`, if known. */
+  marketMinor?: number | null;
 };
 
 type Props = {
@@ -27,11 +30,22 @@ type Props = {
   onChange: (id: string) => void;
   /** Disables the picker and shows the current selection read-only. */
   locked?: boolean;
+  /**
+   * Bump this to clear the search text and move the cursor into the box —
+   * used by "save & add another" to start the next entry.
+   */
+  focusSignal?: number;
 };
 
 const MAX_HITS = 8;
 
-export function ItemPicker({ items, value, onChange, locked }: Props) {
+export function ItemPicker({
+  items,
+  value,
+  onChange,
+  locked,
+  focusSignal = 0,
+}: Props) {
   const toast = useToast();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
@@ -45,11 +59,27 @@ export function ItemPicker({ items, value, onChange, locked }: Props) {
     [items, value],
   );
 
-  // When a selection changes externally (e.g. after inline create) reset the
-  // typed text so the input shows the picked item's name.
-  useEffect(() => {
+  // Derived-state adjustments happen during render, not in effects: React
+  // re-renders immediately with the corrected state and no extra paint.
+  //
+  // 1) When a selection changes externally (e.g. after inline create), show
+  //    the picked item's name in the box.
+  const [seenSelectedId, setSeenSelectedId] = useState(selected?.id ?? null);
+  if ((selected?.id ?? null) !== seenSelectedId) {
+    setSeenSelectedId(selected?.id ?? null);
     if (selected) setQ(selected.name);
-  }, [selected]);
+  }
+  // 2) "Save & add another" bumps focusSignal to start the next entry:
+  //    clear the search text (the cursor move is a DOM effect, below).
+  const [seenSignal, setSeenSignal] = useState(focusSignal);
+  if (seenSignal !== focusSignal) {
+    setSeenSignal(focusSignal);
+    setQ("");
+    setOpen(false);
+  }
+  useEffect(() => {
+    if (focusSignal > 0) inputRef.current?.focus();
+  }, [focusSignal]);
 
   const hits = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -176,15 +206,18 @@ export function ItemPicker({ items, value, onChange, locked }: Props) {
                   type="button"
                   onClick={() => pick(it.id)}
                   onMouseEnter={() => setActive(i)}
-                  className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 text-sm ${
+                  className={`w-full text-left px-3 py-2.5 sm:py-2 flex flex-col items-start sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 text-sm ${
                     i === active
                       ? "bg-zinc-100 dark:bg-zinc-800"
                       : "hover:bg-zinc-50 dark:hover:bg-zinc-900"
                   }`}
                 >
-                  <span className="truncate">{it.name}</span>
+                  <span className="sm:truncate max-w-full">{it.name}</span>
                   <span className="text-[11px] text-zinc-500 whitespace-nowrap">
-                    {it.held} held · {it.currency}
+                    {it.held} held
+                    {it.marketMinor != null && it.marketMinor > 0
+                      ? ` · ${formatAmount(it.marketMinor, it.currency)}`
+                      : ` · ${it.currency}`}
                   </span>
                 </button>
               </li>

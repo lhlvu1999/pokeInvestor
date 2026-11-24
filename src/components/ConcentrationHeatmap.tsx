@@ -40,14 +40,13 @@ export function ConcentrationHeatmap({
       <svg
         viewBox={`0 0 ${w} ${h}`}
         width="100%"
-        height="auto"
         preserveAspectRatio="xMidYMid meet"
         className="block"
         style={{ maxHeight: "360px" }}
         role="img"
         aria-label="Portfolio concentration by tag"
       >
-        {rects.map((r, i) => {
+        {rects.map((r) => {
           const share = r.value / total;
           // Color scale: hotter (more red) as share grows. Log-ish curve so
           // even the smaller ones aren't invisible-blue.

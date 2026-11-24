@@ -4,9 +4,17 @@ import { Card, EmptyState } from "@/components/ui";
 import { listInsights } from "@/lib/server/insights";
 import { getCreatorScores } from "@/lib/server/creator_scores";
 import { getDashboardData } from "@/lib/server/portfolio";
+import { safe } from "@/lib/server/safe";
 import { getSellCandidates } from "@/lib/server/sell_scorecard";
 import { getDisplayCurrency } from "@/lib/server/settings";
 import { getTopSignals, listChannelOptions } from "@/lib/server/signals";
+import { getSignalTrackRecord } from "@/lib/server/signal_track";
+import {
+  DEFAULT_HORIZON_DAYS,
+  DEFAULT_THRESHOLD,
+  HORIZON_OPTIONS,
+  THRESHOLD_OPTIONS,
+} from "@/lib/calc/signal_track";
 import {
   DEFAULT_TIME_WINDOW_DAYS,
   SENTIMENT_OPTIONS,
@@ -16,6 +24,7 @@ import { CreatorScorecard } from "./CreatorScorecard";
 import { InsightCard } from "./InsightCard";
 import { InsightFilters } from "./InsightFilters";
 import { SellScorecard } from "./SellScorecard";
+import { SignalTrackRecord } from "./SignalTrackRecord";
 import { TopSignals } from "./TopSignals";
 
 type Params = {
@@ -23,6 +32,9 @@ type Params = {
   sentiment?: string;
   channel?: string;
   q?: string;
+  horizon?: string;
+  /** Hit threshold in whole percent: 2, 5 or 10. */
+  move?: string;
 };
 
 function parseFilters(p: Params) {
@@ -53,10 +65,22 @@ export default async function InsightsPage({
 }) {
   const sp = await searchParams;
   const filter = parseFilters(sp);
+  const horizonRaw = Number(sp.horizon);
+  const horizon = (HORIZON_OPTIONS as readonly number[]).includes(horizonRaw)
+    ? horizonRaw
+    : DEFAULT_HORIZON_DAYS;
+  const threshold =
+    THRESHOLD_OPTIONS.find((t) => Math.round(t * 100) === Number(sp.move)) ??
+    DEFAULT_THRESHOLD;
+  // The page's filters without the track-record switches, so changing a
+  // switch keeps them (and each switch keeps the other).
+  const baseQuery = new URLSearchParams(
+    Object.entries(sp).filter((e): e is [string, string] => e[1] !== undefined),
+  ).toString();
 
   // Load everything in parallel.
   const displayCurrency = await getDisplayCurrency();
-  const [signals, channels, insights, creatorScores, dashData] =
+  const [signals, channels, insights, creatorScores, dashData, track] =
     await Promise.all([
       getTopSignals({ days: filter.days, channelIds: filter.channelIds }),
       listChannelOptions(),
@@ -68,6 +92,11 @@ export default async function InsightsPage({
       }),
       getCreatorScores({ days: filter.days, channelIds: filter.channelIds }),
       getDashboardData(displayCurrency),
+      safe(
+        "signal track record",
+        () => getSignalTrackRecord(horizon, threshold),
+        null,
+      ),
     ]);
   const sellCandidates = await getSellCandidates({
     items: dashData.items,
@@ -113,6 +142,24 @@ export default async function InsightsPage({
           <TopSignals signals={signals} />
         )}
       </section>
+
+      {track && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-medium tracking-wider uppercase text-zinc-500">
+            Signal track record{" "}
+            <span className="text-xs text-zinc-500 font-normal normal-case tracking-normal">
+              — did creators&apos; calls turn out right?
+            </span>
+          </h2>
+          <SignalTrackRecord
+            record={track.record}
+            historyFrom={track.historyFrom}
+            undatedVideos={track.undatedVideos}
+            horizonDays={horizon}
+            baseQuery={baseQuery}
+          />
+        </section>
+      )}
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium tracking-wider uppercase text-zinc-500">

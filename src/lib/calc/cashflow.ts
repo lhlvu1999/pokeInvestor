@@ -6,6 +6,7 @@
  */
 
 import type { Transaction } from "@/db/schema";
+import { consumeQueue, DEFAULT_COST_METHOD, type CostMethod } from "./holdings";
 
 export type MonthKey = string; // "YYYY-MM"
 
@@ -48,6 +49,7 @@ type Entry = { qty: number; cost: number; lotId: string | null };
  */
 export function replayItemEvents(
   txs: ReadonlyArray<ItemReplayInput>,
+  method: CostMethod = DEFAULT_COST_METHOD,
 ): CashflowBucket[] {
   if (txs.length === 0) return [];
 
@@ -76,23 +78,8 @@ export function replayItemEvents(
       });
       continue;
     }
-    // Sell — consume by lot if lotId is set, else FIFO across all entries.
-    let toSell = tx.quantity;
-    let consumed = 0;
-    for (const entry of queue) {
-      if (toSell === 0) break;
-      if (entry.qty === 0) continue;
-      if (tx.lotId != null && entry.lotId !== tx.lotId) continue;
-      const take = Math.min(toSell, entry.qty);
-      const cost =
-        take === entry.qty
-          ? entry.cost
-          : Math.round((entry.cost * take) / entry.qty);
-      entry.qty -= take;
-      entry.cost -= cost;
-      consumed += cost;
-      toSell -= take;
-    }
+    // Sell — which units it consumed depends on the cost method.
+    const { consumed } = consumeQueue(queue, tx.quantity, tx.lotId, method);
     events.push({
       month,
       spend: 0,
@@ -125,5 +112,7 @@ export function groupByMonthCurrency(
       map.set(key, { ...e });
     }
   }
-  return Array.from(map.values()).sort((a, b) => a.month.localeCompare(b.month));
+  return Array.from(map.values()).sort((a, b) =>
+    a.month.localeCompare(b.month),
+  );
 }

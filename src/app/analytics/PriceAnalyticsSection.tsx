@@ -1,11 +1,11 @@
+import { ItemLink } from "@/components/ItemDrawer";
 import Link from "next/link";
-import { Card, StatCard } from "@/components/ui";
+import { Card } from "@/components/ui";
 import { ItemThumb } from "@/components/ItemThumb";
 import { Money } from "@/components/Money";
 import {
   MOVER_WINDOW_DAYS,
   type PriceAnalytics,
-  type PricedPosition,
 } from "@/lib/server/price_analytics";
 
 function pct(p: number | null, signed = false): string {
@@ -51,12 +51,6 @@ export function PriceAnalyticsSection({
     unpricedCount,
     unpricedNames,
     unpricedCostBasis,
-    totalCostBasis,
-    totalMarketValue,
-    totalUnrealized,
-    topGainers,
-    topLosers,
-    withHistoryCount,
   } = data;
 
   if (positions.length === 0) {
@@ -75,31 +69,8 @@ export function PriceAnalyticsSection({
     );
   }
 
-  const totalPct =
-    totalCostBasis > 0 ? totalMarketValue / totalCostBasis - 1 : null;
-
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard
-          label="Cost basis"
-          hint={`${positions.length} priced positions`}
-        >
-          <Money amount={totalCostBasis} currency={displayCurrency} />
-        </StatCard>
-        <StatCard label="Market value" hint="Latest snapshot each">
-          <Money amount={totalMarketValue} currency={displayCurrency} />
-        </StatCard>
-        <StatCard label="Unrealized">
-          <Money amount={totalUnrealized} currency={displayCurrency} signed />
-        </StatCard>
-        <StatCard label="Return" hint="Market ÷ cost − 1">
-          <span className={`tabular-nums ${pctColor(totalPct)}`}>
-            {pct(totalPct, true)}
-          </span>
-        </StatCard>
-      </div>
-
       {unpricedCount > 0 && (
         <div className="text-xs rounded border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2 text-amber-800 dark:text-amber-300">
           <strong>{unpricedCount}</strong> held item
@@ -118,35 +89,12 @@ export function PriceAnalyticsSection({
         </div>
       )}
 
-      {withHistoryCount === 0 ? (
-        <Card className="p-4 text-xs text-zinc-500">
-          Movers need at least two price snapshots per item. Refresh prices
-          again in a few days and this fills in.
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <MoversTable
-            title="Biggest gainers"
-            subtitle={`price change, up to ${MOVER_WINDOW_DAYS}d`}
-            rows={topGainers}
-            displayCurrency={displayCurrency}
-            emptyText="No positions up over the window."
-          />
-          <MoversTable
-            title="Biggest losers"
-            subtitle={`price change, up to ${MOVER_WINDOW_DAYS}d`}
-            rows={topLosers}
-            displayCurrency={displayCurrency}
-            emptyText="No positions down over the window."
-          />
-        </div>
-      )}
-
       <Card className="overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
-          <h3 className="font-medium">Open positions</h3>
+          <h3 className="font-medium">All open positions</h3>
           <p className="text-xs text-zinc-500 mt-0.5">
-            Held items with a market price, by market value.
+            Every held item with a market price, by market value. The dashboard
+            shows the largest eight and the biggest recent moves.
           </p>
         </div>
         <div className="overflow-x-auto">
@@ -180,12 +128,12 @@ export function PriceAnalyticsSection({
                         name={p.name}
                         size={28}
                       />
-                      <Link
-                        href={`/items/${p.itemId}`}
+                      <ItemLink
+                        itemId={p.itemId}
                         className="font-medium hover:underline truncate"
                       >
                         {p.name}
-                      </Link>
+                      </ItemLink>
                     </div>
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
@@ -232,64 +180,5 @@ export function PriceAnalyticsSection({
         </div>
       </Card>
     </div>
-  );
-}
-
-function MoversTable({
-  title,
-  subtitle,
-  rows,
-  displayCurrency,
-  emptyText,
-}: {
-  title: string;
-  subtitle: string;
-  rows: PricedPosition[];
-  displayCurrency: string;
-  emptyText: string;
-}) {
-  return (
-    <Card className="overflow-hidden">
-      <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
-        <h3 className="font-medium">{title}</h3>
-        <p className="text-xs text-zinc-500 mt-0.5">{subtitle}</p>
-      </div>
-      {rows.length === 0 ? (
-        <div className="px-4 py-6 text-sm text-zinc-500">{emptyText}</div>
-      ) : (
-        <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-          {rows.map((p) => (
-            <div
-              key={p.itemId}
-              className="px-4 py-2.5 flex items-center justify-between gap-3"
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <ItemThumb imageUrl={p.imageUrl} name={p.name} size={24} />
-                <Link
-                  href={`/items/${p.itemId}`}
-                  className="text-sm hover:underline truncate"
-                >
-                  {p.name}
-                </Link>
-              </div>
-              <div className="text-right shrink-0">
-                <div
-                  className={`text-sm font-medium tabular-nums ${pctColor(p.change!.changePct)}`}
-                >
-                  {pct(p.change!.changePct, true)}
-                </div>
-                <div className="text-[10px] text-zinc-500 tabular-nums">
-                  <Money
-                    amount={p.marketValueDisplay}
-                    currency={displayCurrency}
-                  />{" "}
-                  · {formatSpan(p.change!.spanDays)}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
   );
 }

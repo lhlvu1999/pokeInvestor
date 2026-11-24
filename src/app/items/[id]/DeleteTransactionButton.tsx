@@ -49,7 +49,7 @@ export function DeleteTransactionButton({ id }: { id: string }) {
       type="button"
       onClick={handleClick}
       disabled={pending}
-      className="text-xs text-zinc-500 hover:text-rose-600 dark:hover:text-rose-400 disabled:opacity-50"
+      className="text-xs px-2 py-2 sm:p-0 text-zinc-500 hover:text-rose-600 dark:hover:text-rose-400 disabled:opacity-50"
     >
       {pending ? "..." : "Delete"}
     </button>

@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: poke-pipeline-refresh-prices
+  labels:
+    app: poke-pipeline
+    phase: refresh-prices
+spec:
+  # Daily, an hour before the alerts, so they judge fresh prices. The app skips
+  # anything priced in the last hour, so a run right after a manual "Update all
+  # prices" does no extra work, and a missed or repeated run does no harm.
+  schedule: "0 1 * * *"                 # 01:00 UTC = 08:00 in Vietnam
+  timezone: "UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  workflowSpec:
+    workflowTemplateRef:
+      name: poke-pipeline
+    arguments:
+      parameters:
+        - name: phase
+          value: refresh-prices
