@@ -27,6 +27,8 @@ const addSchema = z.object({
   targetBuyPrice: z.string().trim().optional().or(z.literal("")),
   currency: z.string().length(3),
   note: z.string().trim().max(1000).optional().or(z.literal("")),
+  /** Tell me when it reaches the age earlier launches typically bottomed. */
+  stageAlert: z.boolean().optional(),
 });
 
 export type AddWatchlistInput = z.input<typeof addSchema>;
@@ -84,6 +86,7 @@ export async function addWatchlistItem(
       targetBuyPriceCents: targetCents,
       currency,
       note: nullable(parsed.data.note),
+      stageAlert: parsed.data.stageAlert === true,
     })
     .returning();
 
@@ -164,6 +167,8 @@ export async function listWatchlist(): Promise<WatchlistRow[]> {
       added_at: Date;
       hit_at: Date | null;
       target_alerted_at: Date | null;
+      stage_alert: boolean;
+      stage_alerted_at: Date | null;
       linked_item_name: string | null;
       bullish: string;
       bearish: string;
@@ -198,7 +203,7 @@ export async function listWatchlist(): Promise<WatchlistRow[]> {
     SELECT
       w.id, w.name, w.item_id::text AS item_id,
       w.target_buy_price_cents, w.currency, w.note, w.added_at, w.hit_at,
-      w.target_alerted_at,
+      w.target_alerted_at, w.stage_alert, w.stage_alerted_at,
       it.name AS linked_item_name,
       COALESCE(a.bullish, 0)::text AS bullish,
       COALESCE(a.bearish, 0)::text AS bearish,
@@ -226,6 +231,8 @@ export async function listWatchlist(): Promise<WatchlistRow[]> {
       targetAlertedAt: r.target_alerted_at
         ? new Date(r.target_alerted_at)
         : null,
+      stageAlert: r.stage_alert,
+      stageAlertedAt: r.stage_alerted_at ? new Date(r.stage_alerted_at) : null,
     },
     linkedItemName: r.linked_item_name,
     bullish: Number(r.bullish),
@@ -241,3 +248,21 @@ void desc;
 void isNull;
 void sql;
 void items;
+
+/**
+ * Turn the "tell me at the usual low point" alert on or off for an entry.
+ * Turning it on starts it fresh (any earlier "already told you" is cleared).
+ */
+export async function setStageAlert(
+  id: string,
+  on: boolean,
+): Promise<ActionResult<WatchlistItem>> {
+  const [updated] = await db
+    .update(watchlistItems)
+    .set({ stageAlert: on, stageAlertedAt: null })
+    .where(eq(watchlistItems.id, id))
+    .returning();
+  if (!updated) return { ok: false, error: "Not found" };
+  revalidatePath("/watchlist");
+  return { ok: true, data: updated };
+}

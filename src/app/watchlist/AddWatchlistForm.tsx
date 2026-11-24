@@ -34,6 +34,7 @@ export function AddWatchlistForm({
     defaultCurrency ?? DEFAULT_TRANSACTION_CURRENCY,
   );
   const [note, setNote] = useState("");
+  const [stageAlert, setStageAlert] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pickerRef = useRef<HTMLInputElement>(null);
 
@@ -63,6 +64,7 @@ export function AddWatchlistForm({
         targetBuyPrice: targetPrice,
         currency,
         note,
+        stageAlert: stageAlert && itemId != null,
       });
       if (!res.ok) {
         setError(res.error);
@@ -78,6 +80,7 @@ export function AddWatchlistForm({
       setItemQuery("");
       setTargetPrice("");
       setNote("");
+      setStageAlert(false);
       router.refresh();
     });
   }
@@ -203,6 +206,27 @@ export function AddWatchlistForm({
           className="mt-1 w-full px-3 py-2 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm"
         />
       </div>
+
+      <label
+        className={`flex items-start gap-2 text-xs ${
+          itemId ? "cursor-pointer" : "opacity-60"
+        }`}
+      >
+        <input
+          type="checkbox"
+          checked={stageAlert && itemId != null}
+          disabled={itemId == null}
+          onChange={(e) => setStageAlert(e.target.checked)}
+          className="mt-0.5 h-3.5 w-3.5"
+        />
+        <span>
+          Tell me when it reaches the age earlier launches usually bottomed
+          <span className="block text-[11px] text-zinc-500">
+            Needs a linked item that is linked to the catalogue. It describes
+            past launches; it isn&apos;t a recommendation.
+          </span>
+        </span>
+      </label>
 
       {error && (
         <div className="text-sm text-rose-600 dark:text-rose-400">{error}</div>

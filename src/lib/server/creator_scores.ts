@@ -8,7 +8,7 @@
  * client-callable action.
  */
 
-import { and, gte, inArray, sql } from "drizzle-orm";
+import { and, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   youtubeInsightMentions,

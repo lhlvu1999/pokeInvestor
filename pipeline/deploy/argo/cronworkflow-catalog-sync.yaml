@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: poke-pipeline-catalog-sync
+  labels:
+    app: poke-pipeline
+    phase: catalog-sync
+spec:
+  # TCGCSV refreshes at about 20:00 UTC and publishes that day's price archive
+  # then. One run a day, an hour later, reads one ~4 MB file. Running it more
+  # often only re-reads the same data from a one-person hobby site.
+  schedule: "0 21 * * *"
+  timezone: "UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  workflowSpec:
+    workflowTemplateRef:
+      name: poke-pipeline
+    arguments:
+      parameters:
+        - name: phase
+          value: catalog-sync

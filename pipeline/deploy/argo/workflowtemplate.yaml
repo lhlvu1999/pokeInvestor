@@ -18,7 +18,7 @@ spec:
   arguments:
     parameters:
       - name: phase
-        description: "backfill | discover | transcripts | insights | watchlist-alerts | all"
+        description: "backfill | discover | transcripts | insights | watchlist-alerts | weekly-digest | refresh-prices | catalog-sync | all"
   templates:
     - name: run
       inputs:
@@ -53,7 +53,19 @@ spec:
               secretKeyRef:
                 name: poke-pipeline
                 key: ALERT_WEBHOOK_URL
-                optional: true                 # `watchlist-alerts` and mention alerts post here
+                optional: true                 # `watchlist-alerts`, `weekly-digest` and mention alerts post here
+          - name: APP_URL
+            valueFrom:
+              secretKeyRef:
+                name: poke-pipeline
+                key: APP_URL
+                optional: true                 # only `refresh-prices`: where the web app is
+          - name: CRON_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: poke-pipeline
+                key: CRON_TOKEN
+                optional: true                 # only `refresh-prices`: must equal the app's CRON_TOKEN
         resources:
           requests:
             cpu: "100m"

@@ -1,0 +1,5 @@
+{
+  "note": "An empty cart with product suggestions and prices. Nothing was bought, so no rows may come back.",
+  "rows": [],
+  "mustOmit": ["Paldean Fates", "Temporal Forces", "Shrouded Fable", "Twilight Masquerade"]
+}

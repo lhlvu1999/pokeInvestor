@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: poke-pipeline-weekly-digest
+  labels:
+    app: poke-pipeline
+    phase: weekly-digest
+spec:
+  # One summary a week. It is read-only (writes nothing to the database), so a
+  # missed or repeated run does no harm beyond a duplicate message.
+  schedule: "0 2 * * 1"                 # Monday 02:00 UTC = 09:00 in Vietnam
+  timezone: "UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  workflowSpec:
+    workflowTemplateRef:
+      name: poke-pipeline
+    arguments:
+      parameters:
+        - name: phase
+          value: weekly-digest

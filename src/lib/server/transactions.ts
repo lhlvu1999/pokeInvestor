@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { desc, eq, lt } from "drizzle-orm";
+import { desc, eq, inArray, lt } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
 import {
@@ -21,6 +21,7 @@ import {
   DEFAULT_TRANSACTION_CURRENCY,
 } from "@/lib/currency";
 import { storedExitReason } from "@/lib/calc/exit_reason";
+import { checkDateMoves } from "@/lib/calc/bulk_date";
 import { daysLeft, purgeBefore } from "@/lib/calc/recently_deleted";
 import type { ActionResult } from "./items";
 
@@ -421,6 +422,81 @@ export async function createTransactionsBulk(
  * restoring a buy whose currency no longer matches, or a sell with no stock
  * left to cover it). The archive entry is removed in the same step.
  */
+const rescheduleSchema = z.object({
+  moves: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        occurredAt: z.coerce.date(),
+      }),
+    )
+    .min(1, "Nothing selected.")
+    .max(1000, "Move at most 1000 transactions at once."),
+});
+
+/**
+ * Move several transactions to new dates in one go. Each item's whole
+ * timeline is replayed with the new dates first; if any would no longer add
+ * up (a sale ahead of its purchase), nothing moves and the message names the
+ * item. Amounts, quantities and everything else are untouched.
+ */
+export async function rescheduleTransactions(
+  input: z.input<typeof rescheduleSchema>,
+): Promise<ActionResult<{ count: number }>> {
+  const parsed = rescheduleSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  }
+  const { moves } = parsed.data;
+
+  const picked = await db
+    .select({ id: transactions.id, itemId: transactions.itemId })
+    .from(transactions)
+    .where(
+      inArray(
+        transactions.id,
+        moves.map((m) => m.id),
+      ),
+    );
+  const itemIds = Array.from(new Set(picked.map((p) => p.itemId)));
+  const all = itemIds.length
+    ? await db
+        .select()
+        .from(transactions)
+        .where(inArray(transactions.itemId, itemIds))
+    : [];
+  const names = itemIds.length
+    ? await db
+        .select({ id: items.id, name: items.name })
+        .from(items)
+        .where(inArray(items.id, itemIds))
+    : [];
+  const nameById = new Map(names.map((n) => [n.id, n.name]));
+
+  const check = checkDateMoves(
+    all,
+    moves,
+    (id) => nameById.get(id) ?? "An item",
+    new Date(),
+  );
+  if (!check.ok) return { ok: false, error: check.error };
+
+  await db.transaction(async (tx) => {
+    for (const m of moves) {
+      await tx
+        .update(transactions)
+        .set({ occurredAt: m.occurredAt })
+        .where(eq(transactions.id, m.id));
+    }
+  });
+
+  revalidatePath("/");
+  revalidatePath("/items");
+  revalidatePath("/history");
+  for (const id of check.affectedItemIds) revalidatePath(`/items/${id}`);
+  return { ok: true, data: { count: moves.length } };
+}
+
 async function reinsertTransaction(
   tx: Transaction,
 ): Promise<ActionResult<Transaction>> {

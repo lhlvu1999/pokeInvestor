@@ -46,7 +46,7 @@ export function ConcentrationHeatmap({
         role="img"
         aria-label="Portfolio concentration by tag"
       >
-        {rects.map((r, i) => {
+        {rects.map((r) => {
           const share = r.value / total;
           // Color scale: hotter (more red) as share grows. Log-ish curve so
           // even the smaller ones aren't invisible-blue.

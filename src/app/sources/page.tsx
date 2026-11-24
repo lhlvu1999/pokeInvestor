@@ -5,15 +5,18 @@ import { listYoutubeSources } from "@/lib/server/youtube";
 import {
   getPipelineHealth,
   getYoutubeSourceStats,
+  listOrphanChannels,
   type YoutubeSourceStats,
 } from "@/lib/server/youtube_stats";
+import { OrphanChannels } from "./OrphanChannels";
 import { SourcesPanel } from "./SourcesPanel";
 
 export default async function SourcesPage() {
-  const [sources, statsMap, health] = await Promise.all([
+  const [sources, statsMap, health, orphans] = await Promise.all([
     listYoutubeSources(),
     getYoutubeSourceStats(),
     getPipelineHealth(),
+    listOrphanChannels(),
   ]);
   const activeCount = sources.filter((s) => s.active).length;
   const pausedCount = sources.length - activeCount;
@@ -38,7 +41,14 @@ export default async function SourcesPage() {
         )}
       </div>
 
-      {sources.length > 0 && (
+      <OrphanChannels
+        channels={orphans.map((o) => ({
+          ...o,
+          latestPublishedAt: o.latestPublishedAt?.toISOString() ?? null,
+        }))}
+      />
+
+      {(sources.length > 0 || health.totalVideos > 0) && (
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           <HealthTile label="Videos" value={health.totalVideos} tone="info" />
           <HealthTile
@@ -67,7 +77,11 @@ export default async function SourcesPage() {
       {sources.length === 0 ? (
         <EmptyState
           title="No sources yet"
-          description="Add a YouTube channel below to start crawling."
+          description={
+            orphans.length > 0
+              ? "Add the channels above back, or add a new YouTube channel below, to resume crawling."
+              : "Add a YouTube channel below to start crawling."
+          }
         />
       ) : null}
 

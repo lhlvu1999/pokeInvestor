@@ -27,6 +27,20 @@ uv run poke-pipeline transcripts  # youtube-transcript-api fetch
 uv run poke-pipeline insights     # OpenAI structured-output extraction
 uv run poke-pipeline watchlist-alerts   # webhook alert when a watchlist item hits its buy target (daily)
 uv run poke-pipeline watchlist-alerts --dry-run   # show what would be sent; send/write nothing
+uv run poke-pipeline stage-alerts              # opt-in "usual low point" alerts only (also run by watchlist-alerts; --no-stage skips them there)
+uv run poke-pipeline stage-alerts --dry-run    # show what would be sent; send/write nothing
+uv run poke-pipeline sell-alerts               # webhook alert when an item you hold reaches the sell target set on its page (also run by watchlist-alerts; --no-sell skips it there)
+uv run poke-pipeline sell-alerts --dry-run     # show what would be sent; send/write nothing
+uv run poke-pipeline weekly-digest          # post the weekly summary (value and price moves, the week's sales and spending, things worth a look) via ALERT_WEBHOOK_URL; read-only
+uv run poke-pipeline weekly-digest --dry-run # print the message; post nothing
+uv run poke-pipeline refresh-prices       # ask the web app (APP_URL + CRON_TOKEN) to refresh market prices for what you hold; run it daily, before the alerts
+uv run poke-pipeline catalog-sync       # English + Japanese sets, sealed prices, set totals from TCGCSV, then links the items you hold to their catalogue product (daily, after 20:00 UTC)
+uv run poke-pipeline catalog-link-stock --dry-run   # show which held items would be linked automatically; change nothing
+uv run poke-pipeline catalog-fill-images --dry-run # show pictures it would fill for sold sealed items and graded slabs (matched by card number); links nothing
+uv run poke-pipeline catalog-link-slabs --dry-run # show which graded slabs would be matched to a catalogue card (by card number, language and name; one clear match only); catalog-sync then keeps that card's raw price daily, for the Slabs page
+uv run poke-pipeline catalog-sync --day 2026-11-22   # use a specific price-archive day
+uv run poke-pipeline catalog-backfill      # one-off: load price history from 2024-02-08 (resumable, ~50 min, ~3.5 GB of downloads)
+uv run poke-pipeline catalog-backfill --from 2026-05-01 --limit 30   # just part of it
 uv run poke-pipeline all          # backfill → discover → transcripts → insights
 uv run poke-pipeline -v all       # verbose logging
 ```

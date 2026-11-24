@@ -40,28 +40,174 @@ export type RowError = {
 export type ImportPreview = {
   rows: ParsedRow[];
   errors: RowError[];
-  uniqueItems: { matchKey: string; displayName: string; firstRowIndex: number }[];
+  uniqueItems: {
+    matchKey: string;
+    displayName: string;
+    firstRowIndex: number;
+  }[];
   totalBuys: number;
   totalSells: number;
 };
 
-const HEADERS_EXPECTED = [
-  "Item",
-  "In stock",
-  "Date IN",
-  "IN",
-  "Date Out",
-  "OUT",
+/**
+ * The columns we read, and the names a spreadsheet might give them. Only
+ * Item, Date IN and IN are required: a file with no sale columns is just a
+ * list of things you bought. "In stock" is not read at all (stock is worked
+ * out from the buys and sells), so it never has to be present.
+ */
+export type ColumnField =
+  "item" | "inStock" | "dateIn" | "amountIn" | "dateOut" | "amountOut";
+
+export const COLUMN_SPECS: {
+  field: ColumnField;
+  /** The name used in the template and messages. */
+  label: string;
+  required: boolean;
+  /** What it means, in plain words. */
+  help: string;
+  aliases: string[];
+}[] = [
+  {
+    field: "item",
+    label: "Item",
+    required: true,
+    help: "What you bought. Add ' x 12' at the end for a quantity of 12.",
+    aliases: [
+      "item",
+      "item name",
+      "name",
+      "product",
+      "product name",
+      "description",
+    ],
+  },
+  {
+    field: "dateIn",
+    label: "Date IN",
+    required: true,
+    help: "The day you bought it.",
+    aliases: [
+      "date in",
+      "buy date",
+      "date bought",
+      "bought",
+      "purchase date",
+      "date of purchase",
+    ],
+  },
+  {
+    field: "amountIn",
+    label: "IN",
+    required: true,
+    help: "What you paid, in total for the row.",
+    aliases: [
+      "in",
+      "cost",
+      "buy",
+      "buy price",
+      "paid",
+      "price paid",
+      "purchase price",
+      "amount in",
+    ],
+  },
+  {
+    field: "dateOut",
+    label: "Date Out",
+    required: false,
+    help: "The day you sold it. Leave empty if you still have it.",
+    aliases: ["date out", "sell date", "date sold", "sold", "sale date"],
+  },
+  {
+    field: "amountOut",
+    label: "OUT",
+    required: false,
+    help: "What you sold it for, in total. 0 with a Date Out means written off.",
+    aliases: [
+      "out",
+      "sell",
+      "sell price",
+      "sold for",
+      "sale price",
+      "received",
+      "amount out",
+    ],
+  },
+  {
+    field: "inStock",
+    label: "In stock",
+    required: false,
+    help: "Ignored. Stock is worked out from your buys and sells.",
+    aliases: ["in stock", "stock", "instock", "remaining"],
+  },
 ];
 
-export function checkHeaderRow(headerRow: string[]): string | null {
-  const lower = headerRow.map((h) => h.trim().toLowerCase());
-  for (const expected of HEADERS_EXPECTED) {
-    if (!lower.includes(expected.toLowerCase())) {
-      return `Missing required column "${expected}". Got: ${headerRow.join(", ")}`;
+const norm = (h: string) =>
+  h
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, " ");
+
+export type HeaderMap =
+  | {
+      ok: true;
+      /** Column index for each field that was found. */
+      index: Partial<Record<ColumnField, number>>;
+      /** Columns matched under a different name than ours. */
+      renamed: { found: string; as: string }[];
+      /** Columns in the file we don't use. */
+      ignored: string[];
     }
+  | { ok: false; message: string };
+
+/**
+ * Match the file's header row to our columns, forgivingly: any case, spaces
+ * or underscores, and the common alternative names above. The first column
+ * that matches a field wins.
+ */
+export function mapHeader(headerRow: string[]): HeaderMap {
+  const cleaned = headerRow.map(norm);
+  const index: Partial<Record<ColumnField, number>> = {};
+  const renamed: { found: string; as: string }[] = [];
+  const used = new Set<number>();
+
+  for (const spec of COLUMN_SPECS) {
+    const i = cleaned.findIndex(
+      (h, at) => !used.has(at) && spec.aliases.includes(h),
+    );
+    if (i === -1) continue;
+    index[spec.field] = i;
+    used.add(i);
+    if (cleaned[i] !== norm(spec.label))
+      renamed.push({ found: headerRow[i].trim(), as: spec.label });
   }
-  return null;
+
+  const missing = COLUMN_SPECS.filter(
+    (s) => s.required && index[s.field] == null,
+  );
+  if (missing.length > 0) {
+    const names = missing.map((m) => `"${m.label}"`).join(", ");
+    const got = headerRow.map((h) => h.trim()).filter(Boolean);
+    return {
+      ok: false,
+      message: `We couldn't find the ${names} column${missing.length === 1 ? "" : "s"}. Your file's columns are: ${got.length ? got.join(", ") : "(none)"}. Rename a column to match, or download the template to see the layout.`,
+    };
+  }
+
+  return {
+    ok: true,
+    index,
+    renamed,
+    ignored: headerRow
+      .map((h, i) => (used.has(i) ? null : h.trim()))
+      .filter((h): h is string => !!h),
+  };
+}
+
+/** Kept for callers that only want the error: null when the header is usable. */
+export function checkHeaderRow(headerRow: string[]): string | null {
+  const m = mapHeader(headerRow);
+  return m.ok ? null : m.message;
 }
 
 /**
@@ -104,22 +250,40 @@ export function itemMatchKey(name: string): string {
   return name.toLowerCase().normalize("NFKC");
 }
 
+export type DateOrder = "mdy" | "dmy";
+
 /**
- * Parse a US-style date "M/D/YYYY" into a Date. Returns null on failure.
- * Buys are stamped at 09:00 UTC, sells at 17:00 UTC, so same-day buy + sell
- * sort buy-first in chronological replay.
+ * Parse a date into a UTC Date, or null if it isn't one.
+ *
+ * Accepts `2025-09-25` (unambiguous), and `9/25/2025`, `25/9/2025`,
+ * `25-9-2025`, `25.9.2025` read in the given `order`. A two-digit year
+ * means 20yy. Buys are stamped at 09:00 UTC, sells at 17:00 UTC, so a
+ * same-day buy and sell replay buy-first.
  */
-export function parseUsDate(
+export function parseDate(
   input: string,
   hour: number,
+  order: DateOrder = "mdy",
 ): Date | null {
-  const trimmed = input.trim();
-  if (trimmed === "") return null;
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
-  if (!m) return null;
-  const month = Number(m[1]);
-  const day = Number(m[2]);
-  const year = Number(m[3]);
+  const t = input.trim();
+  if (t === "") return null;
+  let year: number;
+  let month: number;
+  let day: number;
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(t);
+  if (iso) {
+    year = Number(iso[1]);
+    month = Number(iso[2]);
+    day = Number(iso[3]);
+  } else {
+    const m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/.exec(t);
+    if (!m) return null;
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    month = order === "mdy" ? a : b;
+    day = order === "mdy" ? b : a;
+    year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+  }
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
   const d = new Date(Date.UTC(year, month - 1, day, hour, 0, 0, 0));
   if (
@@ -130,6 +294,43 @@ export function parseUsDate(
     return null;
   }
   return d;
+}
+
+/** The original US-order entry point, kept for existing callers. */
+export function parseUsDate(input: string, hour: number): Date | null {
+  return parseDate(input, hour, "mdy");
+}
+
+export type DateOrderGuess = {
+  order: DateOrder;
+  /**
+   * True when the file itself settles it (some date has a first number over
+   * 12, or a second number over 12). False when every date is readable both
+   * ways, so day-first vs month-first is a guess the person should confirm.
+   */
+  certain: boolean;
+};
+
+/**
+ * Work out whether a file writes dates day-first or month-first, from the
+ * dates themselves. Only slash/dash/dot dates can be ambiguous; ISO dates
+ * say nothing either way. When nothing settles it, month-first (the
+ * original behaviour) is returned with `certain: false`.
+ */
+export function detectDateOrder(dates: ReadonlyArray<string>): DateOrderGuess {
+  let firstOver12 = 0;
+  let secondOver12 = 0;
+  for (const raw of dates) {
+    const m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/.exec(raw.trim());
+    if (!m) continue;
+    if (Number(m[1]) > 12) firstOver12 += 1;
+    if (Number(m[2]) > 12) secondOver12 += 1;
+  }
+  if (firstOver12 > 0 && secondOver12 === 0)
+    return { order: "dmy", certain: true };
+  if (secondOver12 > 0 && firstOver12 === 0)
+    return { order: "mdy", certain: true };
+  return { order: "mdy", certain: false };
 }
 
 function parseAmount(input: string): number | null {
@@ -147,6 +348,8 @@ export type TransformOptions = {
    * or millions. Defaults to 1.
    */
   valueMultiplier?: number;
+  /** How slash/dash dates are read. Defaults to month-first. */
+  dateOrder?: DateOrder;
 };
 
 /**
@@ -160,6 +363,7 @@ export function transformRow(
   opts: TransformOptions = {},
 ): ParsedRow | RowError | null {
   const multiplier = opts.valueMultiplier ?? 1;
+  const order = opts.dateOrder ?? "mdy";
   if (
     row.item.trim() === "" &&
     row.dateIn.trim() === "" &&
@@ -173,14 +377,18 @@ export function transformRow(
 
   const { name, quantity } = extractQuantity(row.item);
   if (name === "") {
-    return { rowIndex, reason: "Item name is empty after parsing quantity", raw: row };
+    return {
+      rowIndex,
+      reason: "Item name is empty after parsing quantity",
+      raw: row,
+    };
   }
 
-  const buyDate = parseUsDate(row.dateIn, 9);
+  const buyDate = parseDate(row.dateIn, 9, order);
   if (!buyDate) {
     return {
       rowIndex,
-      reason: `Could not parse Date IN: "${row.dateIn}"`,
+      reason: `Could not read the Date IN "${row.dateIn}" as a date`,
       raw: row,
     };
   }
@@ -189,7 +397,7 @@ export function transformRow(
   if (buyAmount == null || buyAmount < 0) {
     return {
       rowIndex,
-      reason: `Could not parse IN value: "${row.amountIn}"`,
+      reason: `Could not read the IN amount "${row.amountIn}" as a number`,
       raw: row,
     };
   }
@@ -206,7 +414,7 @@ export function transformRow(
   // Date Out is authoritative for whether a sell happened. OUT=0 with a
   // Date Out is a real sell at zero (write-off / loss). Only when Date Out
   // is empty do we treat the row as "still held".
-  const sellDate = parseUsDate(row.dateOut, 17);
+  const sellDate = parseDate(row.dateOut, 17, order);
   if (sellDate) {
     const sellAmount = parseAmount(row.amountOut);
     if (sellAmount == null || sellAmount < 0) {
@@ -283,3 +491,15 @@ export function buildPreview(
     totalSells,
   };
 }
+
+/**
+ * A starter file people can fill in. It is itself a valid import (a test
+ * runs it through the importer) and shows each case: a quantity in the name,
+ * something sold, something still held, something written off.
+ */
+export const IMPORT_TEMPLATE_CSV = [
+  "Item,Date IN,IN,Date Out,OUT",
+  "Black Bolt Elite Trainer Box x 4,2025-11-07,8400000,2026-01-15,11200000",
+  "Prismatic Evolutions Booster Bundle,2026-02-10,1600000,,",
+  "Damaged Tin x 2,2026-03-02,900000,2026-04-01,0",
+].join("\n");

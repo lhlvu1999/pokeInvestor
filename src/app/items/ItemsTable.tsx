@@ -1,8 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { ItemLink } from "@/components/ItemDrawer";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { ShowMore } from "@/components/ShowMore";
+import { rowWindow } from "@/lib/calc/row_window";
 import { Card, Select, TextInput } from "@/components/ui";
 import { ItemThumb } from "@/components/ItemThumb";
 import { Money } from "@/components/Money";
@@ -158,6 +161,9 @@ function compare(
   return dir === "asc" ? cmp : -cmp;
 }
 
+/** Items drawn at a time (each is drawn twice, as a phone card and a table row). */
+const ITEMS_PAGE = 200;
+
 export function ItemsTable({
   items,
   converted,
@@ -293,6 +299,15 @@ export function ItemsTable({
   const totalCount = items.length;
   const shownCount = sorted.length;
 
+  // Draw a window of the matching items. Search, filters and sorting above still
+  // cover every item; the window restarts when they change. Today's list fits in
+  // one window, so this only matters as the list grows.
+  const windowKey = [search, statusFilter, activeTags.join(","), sortKey, sortDir].join("\u0000");
+  const [widen, setWiden] = useState({ key: windowKey, extra: 0 });
+  const extra = widen.key === windowKey ? widen.extra : 0;
+  const win = rowWindow(sorted.length, ITEMS_PAGE, extra);
+  const drawn = sorted.slice(0, win.shown);
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-3 flex-wrap">
@@ -323,6 +338,13 @@ export function ItemsTable({
       {allTags.length > 0 && (
         <div className="flex items-center gap-1.5 overflow-x-auto sm:flex-wrap sm:overflow-visible -mx-4 px-4 sm:mx-0 sm:px-0 pb-1 sm:pb-0">
           <span className="text-xs text-zinc-500 mr-1 shrink-0">Tags:</span>
+          <Link
+            href="/items/tags"
+            className="shrink-0 text-[11px] text-sky-700 dark:text-sky-400 hover:underline mr-1"
+            title="Rename your set tags to the catalogue's set names"
+          >
+            Tidy
+          </Link>
           {allTags.map((tag) => {
             const active = activeTags.includes(tag);
             return (
@@ -398,7 +420,7 @@ export function ItemsTable({
         )}
       </div>
       <Card className="sm:hidden divide-y divide-zinc-200 dark:divide-zinc-800">
-        {sorted.map(({ withVal: { item, valuation, latestPrice }, conv }) => (
+        {drawn.map(({ withVal: { item, valuation, latestPrice }, conv }) => (
           <ItemCard
             key={item.id}
             item={item}
@@ -519,7 +541,7 @@ export function ItemsTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-            {sorted.map(
+            {drawn.map(
               ({ withVal: { item, valuation, latestPrice }, conv }) => (
                 <tr
                   key={item.id}
@@ -654,6 +676,13 @@ export function ItemsTable({
           </tbody>
         </table>
       </Card>
+      <ShowMore
+        window={win}
+        noun="items"
+        pageSize={ITEMS_PAGE}
+        onMore={() => setWiden({ key: windowKey, extra: extra + ITEMS_PAGE })}
+        onAll={() => setWiden({ key: windowKey, extra: sorted.length })}
+      />
     </div>
   );
 }

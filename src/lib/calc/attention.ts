@@ -9,6 +9,7 @@
  * order, how it reads) are testable without a database.
  */
 
+import { BACKUP_STALE_DAYS } from "./backup";
 import { ageInDays, ageInHours, formatAge } from "./relative_time";
 
 export type AttentionTone = "warn" | "info" | "good";
@@ -36,7 +37,13 @@ export type AttentionInput = {
   /** Newest market-price snapshot across held items, null if none exist. */
   latestPriceAt: Date | null;
   sell: { count: number; names: string[] };
+  /** Held items whose market price has reached their sell target. */
+  sellTargets?: { count: number; names: string[] };
   watchlist: { count: number; names: string[] };
+  /** Entries that look like slips (see calc/data_checks). */
+  dataChecks?: { count: number; freeSales: number };
+  /** Days since the last backup (null = never), and whether there is anything to lose. */
+  backup?: { daysSince: number | null; hasData: boolean };
 };
 
 /** An undelivered order older than this is worth chasing. */
@@ -63,7 +70,10 @@ export function buildAttentionItems(input: AttentionInput): AttentionItem[] {
     unpriced,
     latestPriceAt,
     sell,
+    sellTargets,
     watchlist,
+    dataChecks,
+    backup,
   } = input;
   const items: AttentionItem[] = [];
 
@@ -111,6 +121,53 @@ export function buildAttentionItems(input: AttentionInput): AttentionItem[] {
       detail: `${formatMoney(unpriced.costDisplay)} of cost isn't reflected in your value`,
       href: "/items",
       cta: "Update prices",
+    });
+  }
+
+  // 3b. Entries that look like slips quietly skew win rate and margin.
+  if (dataChecks && dataChecks.count > 0) {
+    items.push({
+      key: "data-checks",
+      tone: "info",
+      title: `${dataChecks.count} ${plural(dataChecks.count, "entry", "entries")} worth a second look`,
+      detail:
+        dataChecks.freeSales > 0
+          ? `${dataChecks.freeSales} ${plural(dataChecks.freeSales, "sale", "sales")} for nothing, not marked as gifted or lost`
+          : "Possible slips in the dates or prices you logged",
+      href: "/analytics/annual#check",
+      cta: "Review",
+    });
+  }
+
+  // 3c. Everything lives in one database; a copy elsewhere is the only safety net.
+  if (
+    backup?.hasData &&
+    (backup.daysSince === null || backup.daysSince >= BACKUP_STALE_DAYS)
+  ) {
+    items.push({
+      key: "backup",
+      tone: "info",
+      title:
+        backup.daysSince === null
+          ? "No backup of your data yet"
+          : `Last backup was ${backup.daysSince} days ago`,
+      detail: "Everything is stored in one database on this machine",
+      href: "/settings#backup",
+      cta: "Back up",
+    });
+  }
+
+  // 4a. A price you set yourself has been reached. It is good news and
+  //     something you can act on today, so it comes before the softer
+  //     "worth a look" sentiment signals.
+  if (sellTargets && sellTargets.count > 0) {
+    items.push({
+      key: "sell-targets",
+      tone: "good",
+      title: `${sellTargets.count} ${plural(sellTargets.count, "item has", "items have")} reached your sell target`,
+      detail: nameList(sellTargets.names, sellTargets.count),
+      href: "/offer",
+      cta: "Offer",
     });
   }
 

@@ -131,3 +131,43 @@ export async function getPipelineHealth(): Promise<PipelineHealth> {
     totalInsights: Number(row.total_insights ?? 0),
   };
 }
+
+export type OrphanChannel = {
+  channelId: string;
+  title: string | null;
+  videoCount: number;
+  /** Newest video on file, if any has a publish date. */
+  latestPublishedAt: Date | null;
+};
+
+/**
+ * Channels that have videos on file but no source row. Their history is
+ * still used (Insights reads it), but nothing new is fetched for them, so
+ * they quietly go stale. The Sources page lists them so that is visible.
+ */
+export async function listOrphanChannels(): Promise<OrphanChannel[]> {
+  const rows = await db.execute<{
+    channel_id: string;
+    title: string | null;
+    video_count: string;
+    latest: Date | null;
+  }>(sql`
+    SELECT v.channel_id,
+           max(v.channel_title) AS title,
+           count(*)::text       AS video_count,
+           max(v.published_at)  AS latest
+      FROM youtube_videos v
+     WHERE NOT EXISTS (
+             SELECT 1 FROM youtube_sources s
+              WHERE s.kind = 'channel' AND s.external_id = v.channel_id
+           )
+     GROUP BY v.channel_id
+     ORDER BY count(*) DESC
+  `);
+  return Array.from(rows).map((r) => ({
+    channelId: r.channel_id,
+    title: r.title,
+    videoCount: Number(r.video_count),
+    latestPublishedAt: r.latest ? new Date(r.latest) : null,
+  }));
+}

@@ -1,0 +1,109 @@
+{
+ "cases": [
+  {
+   "name": "ME: Ascended Heroes",
+   "language": "en",
+   "tag": "ascended heroes"
+  },
+  {
+   "name": "SV: Prismatic Evolutions",
+   "language": "en",
+   "tag": "prismatic evolutions"
+  },
+  {
+   "name": "ME01: Mega Evolution",
+   "language": "en",
+   "tag": "mega evolution"
+  },
+  {
+   "name": "SV08: Surging Sparks",
+   "language": "en",
+   "tag": "surging sparks"
+  },
+  {
+   "name": "SV10: The Glory of Team Rocket",
+   "language": "ja",
+   "tag": "the glory of team rocket (jp)"
+  },
+  {
+   "name": "SV11B: Black Bolt",
+   "language": "ja",
+   "tag": "black bolt (jp)"
+  },
+  {
+   "name": "SV: Black Bolt",
+   "language": "en",
+   "tag": "black bolt"
+  },
+  {
+   "name": "M2a: High Class Pack: MEGA Dream ex",
+   "language": "ja",
+   "tag": "high class pack: mega dream ex (jp)"
+  },
+  {
+   "name": "SWSH: Crown Zenith: Galarian Gallery",
+   "language": "en",
+   "tag": "crown zenith: galarian gallery"
+  },
+  {
+   "name": "S-P: Sword & Shield Promos",
+   "language": "ja",
+   "tag": "sword & shield promos (jp)"
+  },
+  {
+   "name": "SV: Scarlet & Violet Promo Cards",
+   "language": "en",
+   "tag": "scarlet & violet promo cards"
+  },
+  {
+   "name": "First Partner Collection 2026",
+   "language": "en",
+   "tag": "first partner collection 2026"
+  },
+  {
+   "name": "Champion's Path",
+   "language": "en",
+   "tag": "champion's path"
+  },
+  {
+   "name": "Miscellaneous Cards & Products",
+   "language": "en",
+   "tag": "miscellaneous cards & products"
+  },
+  {
+   "name": "  SV9a:   Heat   Wave  Arena ",
+   "language": "ja",
+   "tag": "heat wave arena (jp)"
+  },
+  {
+   "name": "Pokemon Card 151",
+   "language": "ja",
+   "tag": "pokemon card 151 (jp)"
+  },
+  {
+   "name": "SV2a: Pokemon Card 151",
+   "language": "ja",
+   "tag": "pokemon card 151 (jp)"
+  },
+  {
+   "name": "ME: ",
+   "language": "en",
+   "tag": null
+  },
+  {
+   "name": "",
+   "language": "en",
+   "tag": null
+  },
+  {
+   "name": "SV: A very long set name that goes on and on forever",
+   "language": "en",
+   "tag": null
+  },
+  {
+   "name": "Sword & Shield: Brilliant Stars",
+   "language": "en",
+   "tag": "sword & shield: brilliant stars"
+  }
+ ]
+}

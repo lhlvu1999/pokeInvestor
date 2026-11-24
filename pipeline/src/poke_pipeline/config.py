@@ -154,6 +154,12 @@ class Settings:
     """Max transcripts to extract in a single `insights` invocation."""
     request_timeout_sec: float = 30.0
     """Timeout for outbound HTTP (RSS, transcript). OpenAI uses its own."""
+    app_url: str | None = None
+    """Where the web app is (e.g. `http://poke-investor:3000`). Only the
+    `refresh-prices` command uses it, to ask the app to refresh market prices."""
+    cron_token: str | None = None
+    """The app's `CRON_TOKEN`: the key that lets this command start a price
+    refresh. Never logged."""
 
 
 def _truthy(value: str | None) -> bool:
@@ -231,4 +237,6 @@ def load_settings() -> Settings:
         request_timeout_sec=float(
             _optional("PIPE_HTTP_TIMEOUT_SEC", "30") or "30"
         ),
+        app_url=_optional("APP_URL"),
+        cron_token=_optional("CRON_TOKEN"),
     )

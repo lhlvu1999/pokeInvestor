@@ -8,6 +8,11 @@ import { Card, EmptyState } from "@/components/ui";
 import { Money } from "@/components/Money";
 import { getDisplayCurrency } from "@/lib/server/settings";
 import { listWatchlist } from "@/lib/server/watchlist";
+import { getStageInfos, type StageInfo } from "@/lib/server/watchlist_stage";
+import { StageAlertToggle } from "./StageAlertToggle";
+import { ageLabel } from "@/lib/calc/lifecycle";
+import { SEALED_TYPE_LABELS } from "@/lib/calc/sealed_type";
+import { changeLabel } from "@/lib/calc/set_list";
 import { AddWatchlistForm, type ExistingItem } from "./AddWatchlistForm";
 import { WatchlistRowActions } from "./WatchlistRowActions";
 
@@ -32,6 +37,9 @@ export default async function WatchlistPage() {
     getDisplayCurrency(),
   ]);
   const existing: ExistingItem[] = existingItems;
+  const stages = await getStageInfos(rows).catch(
+    () => new Map<string, StageInfo>(),
+  );
 
   return (
     <div className="flex flex-col gap-6 max-w-5xl">
@@ -99,7 +107,7 @@ export default async function WatchlistPage() {
                           key={entry.id}
                           className="hover:bg-zinc-50 dark:hover:bg-zinc-900/40"
                         >
-                          <td className="px-4 py-2.5">
+                          <td className="px-4 py-2.5 min-w-[15rem]">
                             <div className="font-medium">{entry.name}</div>
                             {linkedItemName &&
                               linkedItemName !== entry.name && (
@@ -118,6 +126,46 @@ export default async function WatchlistPage() {
                                 &ldquo;{entry.note}&rdquo;
                               </div>
                             )}
+                            {(() => {
+                              const st = stages.get(entry.id);
+                              const canFire = st?.kind != null && st.low != null;
+                              return (
+                                <div className="mt-1 flex flex-col gap-1">
+                                  {st && st.ageDays != null && (
+                                    <div className="text-[11px] text-zinc-500 max-w-md leading-relaxed">
+                                      {`${ageLabel(st.ageDays)}${
+                                        st.own
+                                          ? `, ${changeLabel(st.own.change)} since ${st.own.baseAge === 0 ? "release" : `day ${st.own.baseAge}`}`
+                                          : ""
+                                      }. `}
+                                      {st.kind && st.low
+                                        ? `${SEALED_TYPE_LABELS[st.kind]} have usually been lowest around day ${st.low.age} (${changeLabel(st.low.median)}; the middle half of sets between ${changeLabel(st.low.p25)} and ${changeLabel(st.low.p75)}, ${st.low.sets} sets).${st.atLow ? " This one is at that point now." : ""}`
+                                        : st.kind
+                                          ? `${SEALED_TYPE_LABELS[st.kind]} have no consistent low point to point at.`
+                                          : "No comparison for this kind of product."}
+                                    </div>
+                                  )}
+                                  {entry.itemId && (
+                                    <StageAlertToggle
+                                      entryId={entry.id}
+                                      on={entry.stageAlert}
+                                      disabled={!canFire}
+                                    />
+                                  )}
+                                  {entry.stageAlert && !canFire && (
+                                    <div className="text-[11px] text-amber-700 dark:text-amber-400">
+                                      This alert can&apos;t fire: it needs an item
+                                      linked to the catalogue, of a kind with a usual low.
+                                    </div>
+                                  )}
+                                  {entry.stageAlertedAt && (
+                                    <div className="text-[11px] text-zinc-500">
+                                      {`Alert sent ${daysAgo(entry.stageAlertedAt)}.`}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td className="px-4 py-2.5 text-right tabular-nums">
                             {entry.targetBuyPriceCents == null ? (

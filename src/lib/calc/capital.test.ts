@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { computeCapitalFlow, lastMonths, type CapitalEvent } from "./capital";
+import {
+  computeCapitalFlow,
+  fundingByPurchase,
+  fundingKind,
+  lastMonths,
+  type CapitalEvent,
+} from "./capital";
 import { computeHoldings, type CostMethod } from "./holdings";
 
 const at = (iso: string) => new Date(`${iso}T12:00:00Z`);
@@ -200,4 +206,55 @@ describe("agrees with the holdings engine", () => {
       );
     });
   }
+});
+
+describe("fundingByPurchase", () => {
+  const d = (iso: string) => new Date(`${iso}T00:00:00Z`);
+
+  it("splits a purchase between earlier proceeds and new money", () => {
+    const f = fundingByPurchase([
+      { id: "b1", at: d("2025-01-01"), type: "buy", amount: 100 },
+      { id: "s1", at: d("2025-02-01"), type: "sell", amount: 60 },
+      { id: "b2", at: d("2025-03-01"), type: "buy", amount: 90 },
+    ]);
+    expect(f.get("b1")).toEqual({ fresh: 100, rolled: 0 });
+    expect(f.get("b2")).toEqual({ fresh: 30, rolled: 60 });
+    expect(f.has("s1")).toBe(false);
+  });
+
+  it("classifies new / rolled / mixed", () => {
+    expect(fundingKind({ fresh: 10, rolled: 0 })).toBe("new");
+    expect(fundingKind({ fresh: 0, rolled: 10 })).toBe("rolled");
+    expect(fundingKind({ fresh: 4, rolled: 6 })).toBe("mixed");
+    expect(fundingKind({ fresh: 0, rolled: 0 })).toBeNull();
+  });
+
+  it("applies sales first when timestamps are equal, like the totals do", () => {
+    const f = fundingByPurchase([
+      { id: "b", at: d("2025-01-01"), type: "buy", amount: 50 },
+      { id: "s", at: d("2025-01-01"), type: "sell", amount: 50 },
+    ]);
+    expect(f.get("b")).toEqual({ fresh: 0, rolled: 50 });
+  });
+
+  it("agrees with computeCapitalFlow in total", () => {
+    const events = [
+      { id: "1", at: d("2025-01-01"), type: "buy" as const, amount: 500 },
+      { id: "2", at: d("2025-01-10"), type: "sell" as const, amount: 300 },
+      { id: "3", at: d("2025-01-20"), type: "buy" as const, amount: 200 },
+      { id: "4", at: d("2025-02-01"), type: "sell" as const, amount: 800 },
+      { id: "5", at: d("2025-02-15"), type: "buy" as const, amount: 1000 },
+      { id: "6", at: d("2025-03-01"), type: "buy" as const, amount: 40 },
+    ];
+    const flow = computeCapitalFlow(events);
+    const f = fundingByPurchase(events);
+    let fresh = 0;
+    let rolled = 0;
+    for (const v of f.values()) {
+      fresh += v.fresh;
+      rolled += v.rolled;
+    }
+    expect(fresh).toBe(flow.ownMoneyIn);
+    expect(rolled).toBe(flow.rolled);
+  });
 });

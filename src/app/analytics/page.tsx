@@ -71,21 +71,6 @@ export default async function AnalyticsPage() {
         </p>
       </div>
 
-      {/* Open positions — everything below this depends on market_prices,
-          which the realized/sell-based sections further down do not. */}
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium tracking-wider uppercase text-zinc-500">
-          Open positions{" "}
-          <span className="text-xs font-normal normal-case tracking-normal text-zinc-500">
-            — what you hold is currently worth, from market prices
-          </span>
-        </h2>
-        <PriceAnalyticsSection
-          data={priceData}
-          displayCurrency={displayCurrency}
-        />
-      </section>
-
       {/* Headline stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard
@@ -441,6 +426,22 @@ export default async function AnalyticsPage() {
           </div>
         )}
       </Card>
+
+      {/* Open positions — the full list. Last, because it depends on
+          market_prices while everything above is from your own sales, and
+          because the dashboard already leads with the top positions. */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium tracking-wider uppercase text-zinc-500">
+          What you hold{" "}
+          <span className="text-xs font-normal normal-case tracking-normal text-zinc-500">
+            — worth now, from market prices
+          </span>
+        </h2>
+        <PriceAnalyticsSection
+          data={priceData}
+          displayCurrency={displayCurrency}
+        />
+      </section>
     </div>
   );
 }

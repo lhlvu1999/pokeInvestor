@@ -131,6 +131,11 @@ export function SellScorecard({
           </tbody>
         </table>
       </div>
+      <p className="px-4 py-2.5 border-t border-zinc-200 dark:border-zinc-800 text-[11px] text-zinc-500">
+        A prompt to look, built from creator sentiment, how long you&apos;ve
+        held and how much of your stock it is. It isn&apos;t financial advice,
+        and not a prediction of what the price will do.
+      </p>
     </Card>
   );
 }

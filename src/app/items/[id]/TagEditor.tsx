@@ -1,5 +1,6 @@
 "use client";
 
+import { MAX_TAG_LENGTH, MAX_TAGS_PER_ITEM } from "@/lib/calc/set_tags";
 import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setItemTags } from "@/lib/server/items";
@@ -50,12 +51,12 @@ export function TagEditor({
       setDraft("");
       return;
     }
-    if (tags.length >= 12) {
-      setError("Up to 12 tags per item.");
+    if (tags.length >= MAX_TAGS_PER_ITEM) {
+      setError(`Up to ${MAX_TAGS_PER_ITEM} tags per item.`);
       return;
     }
-    if (t.length > 24) {
-      setError("Tags must be 24 characters or fewer.");
+    if (t.length > MAX_TAG_LENGTH) {
+      setError(`Tags must be ${MAX_TAG_LENGTH} characters or fewer.`);
       return;
     }
     const next = [...tags, t];

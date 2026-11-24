@@ -1,0 +1,10 @@
+{
+  "note": "Stock ledger in dong with thousands separators and sales. Black Bolt has an ambiguous date (03/04/2026) and Destined Rivals has no readable amount paid: the prompt says to leave both out.",
+  "rows": [
+    { "item": "Ascended Heroes Elite Trainer Box", "quantity": 3, "dateIn": "2026-03-12", "amountIn": 8070000, "dateOut": "2026-04-20", "amountOut": 9900000 },
+    { "item": "Surging Sparks Booster Box", "quantity": 1, "dateIn": "2026-02-02", "amountIn": 3650000, "dateOut": null, "amountOut": null },
+    { "item": "Prismatic Evolutions Booster Bundle", "quantity": 6, "dateIn": "2026-01-28", "amountIn": 6300000, "dateOut": "2026-03-15", "amountOut": 7200000 },
+    { "item": "Journey Together Mini Tin", "quantity": 4, "dateIn": "2025-12-21", "amountIn": 1280000, "dateOut": null, "amountOut": null }
+  ],
+  "mustOmit": ["Black Bolt", "Destined Rivals"]
+}

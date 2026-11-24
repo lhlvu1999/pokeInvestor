@@ -8,9 +8,20 @@ import { BulkPasteButton, type Existing } from "./BulkPasteButton";
 import { HistoryTable, type HistoryRow } from "./HistoryTable";
 import { RecentlyDeleted } from "./RecentlyDeleted";
 import { listDeletedTransactions } from "@/lib/server/transactions";
+import { getPurchaseFunding } from "@/lib/server/capital";
+import { getDisplayCurrency } from "@/lib/server/settings";
+import { safe } from "@/lib/server/safe";
 
 export default async function HistoryPage() {
-  const deleted = await listDeletedTransactions();
+  const [deleted, funding] = await Promise.all([
+    listDeletedTransactions(),
+    // Optional: a failure just means no funding labels.
+    safe(
+      "purchase funding",
+      async () => getPurchaseFunding(await getDisplayCurrency()),
+      {},
+    ),
+  ]);
   const rows = await db
     .select({
       id: transactions.id,
@@ -33,6 +44,7 @@ export default async function HistoryPage() {
   const data: HistoryRow[] = rows.map((r) => ({
     ...r,
     occurredAt: r.occurredAt.toISOString(),
+    funding: r.type === "buy" ? (funding[r.id] ?? null) : null,
   }));
 
   // Distinct item names + their most-recent currency for the bulk-paste
@@ -74,6 +86,13 @@ export default async function HistoryPage() {
             Export CSV
           </a>
           <BulkPasteButton existing={existing} />
+          <ButtonLink
+            href="/import"
+            variant="secondary"
+            className="flex-1 sm:flex-none"
+          >
+            Import CSV
+          </ButtonLink>
         </div>
       </div>
 

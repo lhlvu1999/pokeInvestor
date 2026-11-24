@@ -1,5 +1,6 @@
 "use server";
 
+import { MAX_TAG_LENGTH, MAX_TAGS_PER_ITEM } from "@/lib/calc/set_tags";
 import { revalidatePath } from "next/cache";
 import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -196,7 +197,7 @@ export async function restoreItem(item: Item): Promise<ActionResult<Item>> {
 
 /**
  * Replace an item's tags. Tags are normalized: trimmed, lowercased,
- * deduplicated, max 24 chars per tag, max 12 tags per item.
+ * deduplicated, max 40 chars per tag (set names run long), max 12 tags per item.
  */
 export async function setItemTags(
   id: string,
@@ -209,9 +210,9 @@ export async function setItemTags(
     new Set(
       rawTags
         .map((t) => t.trim().toLowerCase())
-        .filter((t) => t.length > 0 && t.length <= 24),
+        .filter((t) => t.length > 0 && t.length <= MAX_TAG_LENGTH),
     ),
-  ).slice(0, 12);
+  ).slice(0, MAX_TAGS_PER_ITEM);
 
   await db.update(items).set({ tags: normalized }).where(eq(items.id, id));
   revalidatePath("/items");

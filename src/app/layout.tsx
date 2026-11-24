@@ -2,9 +2,13 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { GlobalSearch } from "@/components/GlobalSearch";
-import { SectionNav, SubNav } from "@/components/Nav";
+import { AddTransactionButton, SectionNav, SubNav } from "@/components/Nav";
 import { ToastProvider } from "@/components/Toast";
 import { ItemDrawerProvider } from "@/components/ItemDrawer";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { HideOnLogin } from "@/components/HideOnLogin";
+import { SignOutButton } from "@/components/SignOutButton";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -30,11 +34,17 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      // data-theme is set by the inline script before React hydrates.
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
         <ToastProvider>
           <ItemDrawerProvider>
+            <HideOnLogin>
             <header className="border-b border-zinc-200/80 dark:border-zinc-800 bg-white/85 dark:bg-zinc-950/85 backdrop-blur sticky top-0 z-10">
               {/* Row 1 — brand + top-level sections */}
               <div className="mx-auto max-w-screen-2xl px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
@@ -48,7 +58,12 @@ export default function RootLayout({
                 <div className="flex-1 max-w-md ml-2 hidden md:block">
                   <GlobalSearch />
                 </div>
-                <SectionNav />
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <SectionNav />
+                  <ThemeToggle />
+                  <SignOutButton />
+                  <AddTransactionButton />
+                </div>
               </div>
               {/* Row 2 — sub-tabs for the active section */}
               <div className="border-t border-zinc-200/60 dark:border-zinc-800/60">
@@ -57,6 +72,7 @@ export default function RootLayout({
                 </div>
               </div>
             </header>
+            </HideOnLogin>
             <main className="flex-1 mx-auto w-full max-w-screen-2xl px-4 sm:px-6 py-8">
               {children}
             </main>

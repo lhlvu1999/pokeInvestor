@@ -29,6 +29,13 @@ export type SellAnalytic = {
   quantity: number;
   /** Stored exit reason: null for a normal sale (see calc/exit_reason). */
   exitReason: string | null;
+  /**
+   * Where the consumed cost came from: one entry per purchase the units were
+   * taken from, with that purchase's date and the part of the cost it carries.
+   * The costs add up to `consumedCostCents`. Lets a report convert each part at
+   * the exchange rate of the day it was bought.
+   */
+  costLots: { buyDate: Date; cost: number }[];
 };
 
 export type HeldLot = {
@@ -100,6 +107,7 @@ export function replayForAnalytics(
     // measured over the units removed oldest-first, under either method.
     let weightedDaysSum = 0;
     let weightedQty = 0;
+    const takes: { buyDate: Date; take: number; cost: number }[] = [];
     const { consumed: consumedCost } = consumeQueue(
       queue,
       tx.quantity,
@@ -112,8 +120,20 @@ export function replayForAnalytics(
         );
         weightedDaysSum += days * take;
         weightedQty += take;
+        // Called before the entry is reduced. Under FIFO this is exactly the
+        // cost taken from it; under the average method the cost is shared out
+        // after the loop, because every unit costs the same.
+        takes.push({
+          buyDate: entry.buyDate,
+          take,
+          cost:
+            take === entry.qty
+              ? entry.cost
+              : Math.round((entry.cost * take) / entry.qty),
+        });
       },
     );
+    const costLots = costLotsOf(takes, consumedCost, method);
     // If the sell can't be fully satisfied here we simply emit what we can —
     // computeHoldings's stricter validation is the source of truth for
     // rejecting bad timelines. Analytics is best-effort.
@@ -134,10 +154,36 @@ export function replayForAnalytics(
       daysHeldAvg,
       quantity: tx.quantity,
       exitReason: tx.exitReason ?? null,
+      costLots,
     });
   }
 
   return { sells, remaining: queue.filter((e) => e.qty > 0) };
+}
+
+/**
+ * Split a sale's consumed cost over the purchases it came from. FIFO knows the
+ * cost of each part exactly. The average method costs every unit the same, so
+ * the total is shared out by units, with the rounding left over going to the
+ * last part so the pieces always add up to the whole.
+ */
+export function costLotsOf(
+  takes: ReadonlyArray<{ buyDate: Date; take: number; cost: number }>,
+  consumed: number,
+  method: CostMethod,
+): { buyDate: Date; cost: number }[] {
+  if (takes.length === 0) return [];
+  if (method !== "average") {
+    return takes.map((t) => ({ buyDate: t.buyDate, cost: t.cost }));
+  }
+  const units = takes.reduce((n, t) => n + t.take, 0);
+  let left = consumed;
+  return takes.map((t, i) => {
+    const share =
+      i === takes.length - 1 ? left : Math.round((consumed * t.take) / units);
+    left -= share;
+    return { buyDate: t.buyDate, cost: share };
+  });
 }
 
 /* ------------------------------------------------------------------ */

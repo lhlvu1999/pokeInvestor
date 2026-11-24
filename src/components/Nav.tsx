@@ -13,6 +13,18 @@ type Section = {
 };
 
 /**
+ * Pages that belong to STOCK but are reached by an action button instead of
+ * a tab: "Add" is the header button, "Import" lives on the History page.
+ * Listed so the STOCK section stays selected while you are on them.
+ */
+const ACTION_PAGES: Record<string, Section["id"]> = {
+  "/transactions": "stock",
+  "/import": "stock",
+  "/stock-count": "stock",
+  "/catalog/links": "stock",
+};
+
+/**
  * Two-level navigation. Top row is the three feature areas; bottom row is the
  * children of whichever area the current URL belongs to.
  *
@@ -44,24 +56,20 @@ const SECTIONS: Section[] = [
         description: "Products you want to buy, with creator sentiment",
       },
       {
-        href: "/transactions/new",
-        label: "Add",
-        description: "Record a purchase or a sale",
-      },
-      {
         href: "/offer",
         label: "Offer",
         description: "Price a block of stock for a buyer and mark it sold",
       },
       {
+        href: "/share",
+        label: "Share",
+        description:
+          "Send a read-only snapshot of what you hold, with what you paid kept private",
+      },
+      {
         href: "/history",
         label: "History",
         description: "Every transaction, newest first",
-      },
-      {
-        href: "/import",
-        label: "Import",
-        description: "Bring in transactions from a CSV",
       },
     ],
   },
@@ -74,6 +82,49 @@ const SECTIONS: Section[] = [
         href: "/analytics",
         label: "Analytics",
         description: "Open positions, price movers and returns",
+      },
+      {
+        href: "/analytics/returns",
+        label: "Returns",
+        description: "Yearly return on each position, from a starting point you choose",
+      },
+      {
+        href: "/analytics/vs-market",
+        label: "Vs market",
+        description: "How much of your result is you and how much is the market",
+      },
+      {
+        href: "/analytics/exposure",
+        label: "Exposure",
+        description: "What your stock is made of, and how far prices like it have moved",
+      },
+      {
+        href: "/analytics/slabs",
+        label: "Slabs",
+        description: "Your graded slabs against the same card ungraded",
+      },
+      {
+        href: "/analytics/annual",
+        label: "Yearly",
+        description: "What you sold each year and earned, with a sales download",
+      },
+      {
+        href: "/catalog",
+        label: "Sets",
+        description:
+          "Every English and Japanese set with its value, top cards and sealed prices",
+      },
+      {
+        href: "/catalog/insights",
+        label: "Set insights",
+        description:
+          "Market indexes for sets and sealed products, and how prices age after release",
+      },
+      {
+        href: "/catalog/calendar",
+        label: "Calendar",
+        description:
+          "Sets coming up and just out, with prices and what earlier launches did",
       },
       {
         href: "/sources",
@@ -116,12 +167,30 @@ function matches(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/** The tab that best fits the URL: the longest matching href wins, so
+ * /catalog/insights lights up "Set insights", not its parent "Sets". */
+function bestChild(section: Section, pathname: string) {
+  let best: Section["children"][number] | undefined;
+  for (const child of section.children) {
+    if (
+      matches(pathname, child.href) &&
+      (!best || child.href.length > best.href.length)
+    ) {
+      best = child;
+    }
+  }
+  return best;
+}
+
 /**
  * Determine which section "owns" the current URL. Falls back to STOCK so the
  * sub-nav row never disappears — keeps the header height stable as the user
  * navigates.
  */
 function activeSection(pathname: string): Section {
+  for (const [href, id] of Object.entries(ACTION_PAGES)) {
+    if (matches(pathname, href)) return SECTIONS.find((s) => s.id === id)!;
+  }
   for (const section of SECTIONS) {
     for (const child of section.children) {
       if (matches(pathname, child.href)) return section;
@@ -150,7 +219,7 @@ export function SectionNav() {
             {i > 0 && (
               <span
                 aria-hidden
-                className="px-2.5 text-zinc-300 dark:text-zinc-700"
+                className="px-2 sm:px-2.5 text-zinc-300 dark:text-zinc-700"
               >
                 ·
               </span>
@@ -181,7 +250,7 @@ export function SectionNav() {
 export function SubNav() {
   const pathname = usePathname() ?? "/";
   const section = activeSection(pathname);
-  const current = section.children.find((c) => matches(pathname, c.href));
+  const current = bestChild(section, pathname);
   return (
     <>
       <nav
@@ -191,7 +260,7 @@ export function SubNav() {
         className="flex min-w-0 items-center gap-0.5 overflow-x-auto text-sm"
       >
         {section.children.map((link) => {
-          const isActive = matches(pathname, link.href);
+          const isActive = link === current;
           return (
             <Link
               key={link.href}
@@ -217,5 +286,37 @@ export function SubNav() {
         </p>
       )}
     </>
+  );
+}
+
+/**
+ * The one action you do all day: record a buy or a sale. A header button on
+ * every page rather than a tab among the page links. Hidden on the form
+ * itself, where it would point at the page you are already on.
+ */
+export function AddTransactionButton() {
+  const pathname = usePathname() ?? "/";
+  if (matches(pathname, "/transactions/new")) return null;
+  return (
+    <Link
+      href="/transactions/new"
+      aria-label="Add transaction"
+      title="Add transaction"
+      className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-zinc-900 px-2.5 text-sm font-medium text-white shadow-sm hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 sm:px-3"
+    >
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        aria-hidden="true"
+      >
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+      <span className="hidden sm:inline">Add</span>
+    </Link>
   );
 }

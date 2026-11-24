@@ -1,11 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
-import { youtubeSources, type YoutubeSource } from "@/db/schema";
-import { recognizeSourceInput, resolveYoutubeHandle } from "@/lib/youtube/parse";
+import { youtubeSources, youtubeVideos, type YoutubeSource } from "@/db/schema";
+import {
+  recognizeSourceInput,
+  resolveYoutubeHandle,
+} from "@/lib/youtube/parse";
 import type { ActionResult } from "./items";
 
 /* ------------------------------------------------------------------ */
@@ -46,7 +49,10 @@ export async function addYoutubeSource(
 ): Promise<ActionResult<YoutubeSource>> {
   const parsed = addSchema.safeParse(raw);
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input",
+    };
   }
 
   const recognized = recognizeSourceInput(parsed.data.input);
@@ -78,7 +84,7 @@ export async function addYoutubeSource(
   } else {
     kind = recognized.kind;
     externalId = recognized.externalId;
-    handle = "handle" in recognized ? recognized.handle ?? null : null;
+    handle = "handle" in recognized ? (recognized.handle ?? null) : null;
   }
 
   // Dedupe on (kind, externalId).
@@ -118,6 +124,77 @@ export async function addYoutubeSource(
 
   revalidatePath("/sources");
   return { ok: true, data: inserted[0] };
+}
+
+/**
+ * Turn a channel whose videos are already on file into a source again, so
+ * new uploads are fetched. Videos were kept when their source went away, so
+ * this relinks them rather than starting from nothing.
+ *
+ * The source is added as already backfilled: the history is here, and the
+ * normal backfill would re-read (and re-pay to process) up to a hundred
+ * videos per channel. Edit the source's backfill settings to requeue it.
+ */
+export async function adoptChannelAsSource(
+  channelId: string,
+): Promise<ActionResult<YoutubeSource>> {
+  const id = z
+    .string()
+    .regex(/^UC[\w-]{22}$/, "That doesn't look like a YouTube channel ID")
+    .safeParse(channelId);
+  if (!id.success) {
+    return {
+      ok: false,
+      error: id.error.issues[0]?.message ?? "Invalid channel",
+    };
+  }
+
+  const [known] = await db
+    .select({ title: youtubeVideos.channelTitle })
+    .from(youtubeVideos)
+    .where(eq(youtubeVideos.channelId, id.data))
+    .limit(1);
+  if (!known)
+    return { ok: false, error: "No videos on file for that channel." };
+
+  const [existing] = await db
+    .select()
+    .from(youtubeSources)
+    .where(
+      and(
+        eq(youtubeSources.kind, "channel"),
+        eq(youtubeSources.externalId, id.data),
+      ),
+    )
+    .limit(1);
+  if (existing)
+    return { ok: false, error: "That source is already on the list." };
+
+  const created = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(youtubeSources)
+      .values({
+        kind: "channel",
+        externalId: id.data,
+        title: known.title,
+        backfilledAt: new Date(),
+      })
+      .returning();
+    await tx
+      .update(youtubeVideos)
+      .set({ sourceId: row.id })
+      .where(
+        and(
+          eq(youtubeVideos.channelId, id.data),
+          isNull(youtubeVideos.sourceId),
+        ),
+      );
+    return row;
+  });
+
+  revalidatePath("/sources");
+  revalidatePath("/insights");
+  return { ok: true, data: created };
 }
 
 const updateSchema = backfillSettingsSchema.extend({

@@ -6,6 +6,7 @@ import {
   MARGIN_PCT_LABELS,
   makeHistogram,
   replayForAnalytics,
+  costLotsOf,
 } from "./analytics";
 
 const t = (iso: string) => new Date(iso);
@@ -142,5 +143,49 @@ describe("makeHistogram", () => {
 
   it("rejects mismatched edges/labels", () => {
     expect(() => makeHistogram([1], [0, 10], ["x", "y"])).toThrow();
+  });
+});
+
+describe("costLotsOf", () => {
+  const a = new Date("2026-01-01T00:00:00Z");
+  const b = new Date("2026-02-01T00:00:00Z");
+  it("keeps FIFO costs exactly", () => {
+    expect(
+      costLotsOf([{ buyDate: a, take: 1, cost: 100 }, { buyDate: b, take: 1, cost: 300 }], 400, "fifo"),
+    ).toEqual([{ buyDate: a, cost: 100 }, { buyDate: b, cost: 300 }]);
+  });
+  it("shares the average method's cost by units and always adds up", () => {
+    const lots = costLotsOf(
+      [{ buyDate: a, take: 1, cost: 0 }, { buyDate: b, take: 2, cost: 0 }],
+      100,
+      "average",
+    );
+    expect(lots.reduce((n, l) => n + l.cost, 0)).toBe(100);
+    expect(lots[0].cost).toBe(33);
+  });
+  it("has nothing for no takes", () => {
+    expect(costLotsOf([], 0, "fifo")).toEqual([]);
+  });
+});
+
+describe("replay costLots", () => {
+  const mk = (type: "buy" | "sell", day: number, qty: number, value: number) =>
+    ({
+      id: `${type}${day}`, type, quantity: qty, finalValueCents: value,
+      occurredAt: new Date(Date.UTC(2026, 0, day)), currency: "VND", lotId: null, status: "received",
+    }) as never;
+  it("always adds up to what the sale cost, under both methods", () => {
+    const txs = [mk("buy", 1, 3, 1000), mk("buy", 5, 2, 777), mk("sell", 9, 4, 5000), mk("sell", 12, 1, 100)];
+    for (const method of ["fifo", "average"] as const) {
+      const { sells } = replayForAnalytics(txs, method);
+      for (const s of sells) {
+        expect(s.costLots.reduce((n, l) => n + l.cost, 0)).toBe(s.consumedCostCents);
+      }
+    }
+  });
+  it("names the purchases the units came from", () => {
+    const txs = [mk("buy", 1, 3, 1000), mk("buy", 5, 2, 800), mk("sell", 9, 4, 5000)];
+    const { sells } = replayForAnalytics(txs, "fifo");
+    expect(sells[0].costLots.map((l) => [l.buyDate.getUTCDate(), l.cost])).toEqual([[1, 1000], [5, 400]]);
   });
 });

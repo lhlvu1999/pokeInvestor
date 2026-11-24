@@ -25,7 +25,14 @@ Write standard Postgres SQL. Prefer aggregation to fetching raw rows.
 items
   id uuid, name text, set_code text, card_number text, image_url text,
   note text, source_url text, pricecharting_id text, tags text[],
-  aliases text[], created_at timestamptz
+  aliases text[], created_at timestamptz,
+  catalog_product_id bigint null → catalog_products (linked sealed product),
+  catalog_link_skipped bool (true = deliberately not in the catalogue),
+  catalog_link_source text null ('auto' = linked by the daily sync, 'manual', 'declined'),
+  sell_target_cents integer null, sell_target_currency varchar(3) null,  -- tell me when the market price reaches this (minor units); null = no target
+  sell_target_alerted_at timestamptz null  -- set when the daily check alerted that it was reached; cleared if the price falls back below
+  raw_card_product_id bigint null → catalog_products (for a graded slab: the catalogue CARD it is, matched by card number; its raw price is kept daily in catalog_prices),
+  raw_card_skipped bool (true = the person said the matched card is wrong)
 
 transactions
   id uuid, item_id uuid → items,
@@ -45,6 +52,36 @@ market_prices
   source text ('manual' | 'tcgplayer' | 'ebay' | 'pricecharting'),
   fetched_at timestamptz
   -- Time-series. For "current price" pick MAX(fetched_at) per item.
+
+catalog_sets
+  group_id bigint PK, category_id integer (3 English, 85 Japanese),
+  language text ('en' | 'ja'), name text, abbreviation text,
+  published_on timestamp, products_synced_at timestamptz
+  -- Every English and Japanese Pokémon set (TCGplayer data).
+
+catalog_products
+  product_id bigint PK, group_id bigint → catalog_sets,
+  name text, kind text ('sealed' | 'card'), rarity text, card_number text,
+  image_url text, url text
+  -- items.catalog_product_id links an item to a SEALED product here.
+
+catalog_prices
+  product_id bigint → catalog_products, day timestamp,
+  market_cents integer, low_cents integer, mid_cents integer, high_cents integer
+  -- Daily TCGplayer prices of SEALED products only, in US CENTS (USD),
+  -- not the item's own currency. PK (product_id, day).
+
+catalog_set_daily
+  group_id bigint → catalog_sets, day timestamp,
+  card_count integer, priced_count integer,
+  total_cents bigint, top10_cents bigint, top20_cents bigint
+  -- Per-set totals in US cents. A card counts at its highest printing's
+  -- market price. Individual card prices are not stored.
+
+catalog_set_top
+  group_id bigint → catalog_sets, day timestamp, rank integer (1 = most valuable),
+  product_id bigint → catalog_products, market_cents integer, variant text
+  -- A set's top-20 cards, snapshotted weekly.
 
 youtube_sources
   id uuid, kind text ('channel' | 'video'), external_id text,
@@ -86,7 +123,9 @@ watchlist_items
   target_buy_price_cents integer null, currency varchar(3),
   note text null,
   added_at timestamptz, hit_at timestamptz null,
-  target_alerted_at timestamptz null  -- set when the daily check alerted that the linked item's price reached the target; cleared if it rises back above
+  target_alerted_at timestamptz null,  -- set when the daily check alerted that the linked item's price reached the target; cleared if it rises back above
+  stage_alert boolean,  -- opt-in: alert when the product reaches the age earlier launches of its kind typically bottomed
+  stage_alerted_at timestamptz null  -- set when that alert was sent (once per product)
   -- Active entries have hit_at IS NULL. When the user buys the product,
   -- hit_at is set (row kept for history). A market price reaching the
   -- target only sets target_alerted_at (a notification, not a purchase).

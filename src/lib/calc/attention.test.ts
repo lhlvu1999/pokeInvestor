@@ -281,3 +281,102 @@ describe("pickMovers", () => {
     });
   });
 });
+
+describe("buildAttentionItems — sell targets", () => {
+  it("says nothing without any (and when the input is absent)", () => {
+    expect(buildAttentionItems(base({ sellTargets: { count: 0, names: [] } }))).toEqual([]);
+    expect(buildAttentionItems(base())).toEqual([]);
+  });
+
+  it("lists items that reached their target, as good news with a way to sell", () => {
+    const [row] = buildAttentionItems(
+      base({ sellTargets: { count: 1, names: ["Ascended Heroes ETB"] } }),
+    );
+    expect(row).toMatchObject({
+      key: "sell-targets",
+      tone: "good",
+      title: "1 item has reached your sell target",
+      detail: "Ascended Heroes ETB",
+      href: "/offer",
+    });
+  });
+
+  it("pluralises and caps a long list of names", () => {
+    const [row] = buildAttentionItems(
+      base({ sellTargets: { count: 5, names: ["A", "B", "C", "D", "E"] } }),
+    );
+    expect(row.title).toBe("5 items have reached your sell target");
+    expect(row.detail).toBe("A, B +3 more");
+  });
+
+  it("comes before the softer sell signals", () => {
+    const out = buildAttentionItems(
+      base({
+        sell: { count: 2, names: ["X", "Y"] },
+        sellTargets: { count: 1, names: ["Z"] },
+      }),
+    );
+    expect(out.map((r) => r.key)).toEqual(["sell-targets", "sell"]);
+  });
+});
+
+describe("data checks row", () => {
+  const base = {
+    now: new Date("2026-11-24T00:00:00Z"),
+    formatMoney: (m: number) => String(m),
+    pending: null,
+    unpriced: { count: 0, costDisplay: 0 },
+    latestPriceAt: null,
+    sell: { count: 0, names: [] },
+    watchlist: { count: 0, names: [] },
+  };
+  it("is absent when nothing looks wrong", () => {
+    expect(
+      buildAttentionItems({ ...base, dataChecks: { count: 0, freeSales: 0 } }),
+    ).toEqual([]);
+  });
+  it("names the free sales when there are some", () => {
+    const [row] = buildAttentionItems({
+      ...base,
+      dataChecks: { count: 3, freeSales: 2 },
+    });
+    expect(row.key).toBe("data-checks");
+    expect(row.title).toBe("3 entries worth a second look");
+    expect(row.detail).toContain("2 sales for nothing");
+    expect(row.href).toBe("/analytics/annual#check");
+  });
+  it("uses singular wording", () => {
+    const [row] = buildAttentionItems({
+      ...base,
+      dataChecks: { count: 1, freeSales: 1 },
+    });
+    expect(row.title).toBe("1 entry worth a second look");
+    expect(row.detail).toContain("1 sale for nothing");
+  });
+});
+
+describe("backup row", () => {
+  const base = {
+    now: new Date("2026-11-24T00:00:00Z"),
+    formatMoney: (m: number) => String(m),
+    pending: null,
+    unpriced: { count: 0, costDisplay: 0 },
+    latestPriceAt: null,
+    sell: { count: 0, names: [] },
+    watchlist: { count: 0, names: [] },
+  };
+  it("asks for a first backup once there is data", () => {
+    const [row] = buildAttentionItems({ ...base, backup: { daysSince: null, hasData: true } });
+    expect(row.key).toBe("backup");
+    expect(row.title).toBe("No backup of your data yet");
+    expect(row.href).toBe("/settings#backup");
+  });
+  it("stays quiet when there is nothing to lose", () => {
+    expect(buildAttentionItems({ ...base, backup: { daysSince: null, hasData: false } })).toEqual([]);
+  });
+  it("stays quiet for a recent backup and speaks up when it is stale", () => {
+    expect(buildAttentionItems({ ...base, backup: { daysSince: 29, hasData: true } })).toEqual([]);
+    const [row] = buildAttentionItems({ ...base, backup: { daysSince: 30, hasData: true } });
+    expect(row.title).toBe("Last backup was 30 days ago");
+  });
+});

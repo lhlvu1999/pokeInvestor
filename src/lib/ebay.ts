@@ -24,8 +24,14 @@ import {
 } from "./calc/price_estimate";
 import { pickRepresentativeImage } from "./calc/ebay_image";
 
-const OAUTH_URL = "https://api.ebay.com/identity/v1/oauth2/token";
-const BROWSE_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search";
+/**
+ * eBay's API address. `EBAY_API_BASE` swaps it, e.g. to eBay's sandbox
+ * (https://api.sandbox.ebay.com) or a local stand-in while testing. Read on each
+ * call, so it can be set without a restart in tests.
+ */
+const apiBase = () => (process.env.EBAY_API_BASE || "https://api.ebay.com").replace(/\/$/, "");
+const oauthUrl = () => `${apiBase()}/identity/v1/oauth2/token`;
+const browseUrl = () => `${apiBase()}/buy/browse/v1/item_summary/search`;
 const SCOPE = "https://api.ebay.com/oauth/api_scope";
 
 /** "Collectible Card Games". Broad enough to include every Pokémon TCG
@@ -102,7 +108,7 @@ export async function getAppToken(): Promise<string> {
   }
 
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-  const res = await fetch(OAUTH_URL, {
+  const res = await fetch(oauthUrl(), {
     method: "POST",
     headers: {
       Authorization: `Basic ${basic}`,
@@ -196,7 +202,7 @@ export async function searchListings(
     sort: "price",
   });
 
-  const res = await fetch(`${BROWSE_URL}?${params}`, {
+  const res = await fetch(`${browseUrl()}?${params}`, {
     headers: {
       Authorization: `Bearer ${token}`,
       "X-EBAY-C-MARKETPLACE-ID": marketplaceId,

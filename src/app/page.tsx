@@ -26,6 +26,12 @@ import {
   type TagRollup,
 } from "@/lib/server/portfolio";
 import { getCapitalFlow } from "@/lib/server/capital";
+import { getAnnualizedReturn } from "@/lib/server/annualized";
+import { getSellTargetHits } from "@/lib/server/sell_target_hits";
+import { getDataIssues } from "@/lib/server/data_checks";
+import { getLastBackupAt } from "@/lib/server/backup";
+import { daysSinceBackup } from "@/lib/calc/backup";
+import { AnnualizedCard } from "@/components/dashboard/AnnualizedCard";
 import { listPriceRefreshTargets } from "@/lib/server/prices";
 import {
   getPriceAnalytics,
@@ -105,6 +111,10 @@ export default async function DashboardPage({
     sellCandidates,
     watchlistRows,
     capital,
+    annualized,
+    sellTargetHits,
+    dataIssues,
+    lastBackupAt,
   ] = await Promise.all([
     getCashflowLines(displayCurrency, { itemIdsFilter: cashflowItemIds }),
     getPortfolioValueSeries(displayCurrency),
@@ -126,6 +136,14 @@ export default async function DashboardPage({
     ),
     safe("watchlist", () => listWatchlist(), []),
     safe("capital flow", () => getCapitalFlow(displayCurrency), null),
+    safe(
+      "annualized return",
+      () => getAnnualizedReturn(dash, displayCurrency, new Date()),
+      null,
+    ),
+    safe("sell targets", () => getSellTargetHits(), []),
+    safe("data checks", () => getDataIssues(), []),
+    safe("last backup", () => getLastBackupAt(), null),
   ]);
 
   const now = new Date();
@@ -157,16 +175,30 @@ export default async function DashboardPage({
       count: strongSell.length,
       names: strongSell.map((c) => c.name),
     },
+    sellTargets: {
+      count: sellTargetHits.length,
+      names: sellTargetHits.map((h) => h.name),
+    },
     watchlist: {
       count: bullishWatch.length,
       names: bullishWatch.map((r) => r.entry.name),
+    },
+    backup: {
+      daysSince: daysSinceBackup(lastBackupAt, now),
+      hasData: items.length > 0,
+    },
+    dataChecks: {
+      count: dataIssues.length,
+      freeSales: dataIssues.filter((f) => f.kind === "free_sale").length,
     },
   });
 
   const fxLine = formatRateLine(fxNotes);
   const tagRollup = rollupByTag(items, converted);
   const showCapital = capital != null && capital.flow.spent > 0;
-  const showSideColumn = tagRollup.length > 0 || showCapital;
+  const showAnnualized =
+    annualized != null && annualized.report.status !== "none";
+  const showSideColumn = tagRollup.length > 0 || showCapital || showAnnualized;
 
   // All tags that appear on any item — surface as chips above the chart.
   const allTags = Array.from(
@@ -177,7 +209,7 @@ export default async function DashboardPage({
     const next = activeCashflowTags.includes(tag)
       ? activeCashflowTags.filter((t) => t !== tag)
       : [...activeCashflowTags, tag];
-    return next.length === 0 ? "/" : `/?cashflowTags=${next.join(",")}`;
+    return next.length === 0 ? "/" : `/?cashflowTags=${next.map(encodeURIComponent).join(",")}`;
   }
 
   return (
@@ -279,6 +311,14 @@ export default async function DashboardPage({
             </div>
             {showSideColumn && (
               <div className="min-w-0 flex flex-col gap-4">
+                {showAnnualized && (
+                  <AnnualizedCard
+                    report={annualized.report}
+                    currency={displayCurrency}
+                    atCostValue={annualized.atCostValue}
+                    skipped={annualized.skipped}
+                  />
+                )}
                 {showCapital && (
                   <CapitalCard
                     flow={capital.flow}

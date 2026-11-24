@@ -68,6 +68,19 @@ function monthOf(d: Date): MonthKey {
   return `${d.getUTCFullYear()}-${m}`;
 }
 
+/**
+ * Time order; sales before buys at the same instant. Array.sort is stable,
+ * so equal events keep their input order. Shared by the totals and the
+ * per-purchase funding so they can never disagree on who was funded first.
+ */
+function inReplayOrder<E extends CapitalEvent>(events: ReadonlyArray<E>): E[] {
+  return [...events].sort(
+    (a, b) =>
+      a.at.getTime() - b.at.getTime() ||
+      (a.type === b.type ? 0 : a.type === "sell" ? -1 : 1),
+  );
+}
+
 export function computeCapitalFlow(
   events: ReadonlyArray<CapitalEvent>,
 ): CapitalFlow {
@@ -84,13 +97,7 @@ export function computeCapitalFlow(
     };
   }
 
-  // Time order; sales before buys at the same instant. Array.sort is stable,
-  // so equal events keep their input order.
-  const sorted = [...usable].sort(
-    (a, b) =>
-      a.at.getTime() - b.at.getTime() ||
-      (a.type === b.type ? 0 : a.type === "sell" ? -1 : 1),
-  );
+  const sorted = inReplayOrder(usable);
 
   let pool = 0;
   let ownMoneyIn = 0;
@@ -160,3 +167,38 @@ export function lastMonths(
 
 /** Month key `n` months after `k`, re-exported for callers building labels. */
 export { addMonths };
+
+/** How one purchase was paid for. */
+export type Funding = { fresh: number; rolled: number };
+
+/** "new" = all your own money, "rolled" = all from earlier sales, "mixed". */
+export type FundingKind = "new" | "rolled" | "mixed";
+
+export function fundingKind(f: Funding): FundingKind | null {
+  if (f.fresh + f.rolled <= 0) return null;
+  if (f.rolled === 0) return "new";
+  if (f.fresh === 0) return "rolled";
+  return "mixed";
+}
+
+/**
+ * For each purchase, how much came from new money and how much from earlier
+ * sale proceeds. The same pool replay as `computeCapitalFlow`, so summing
+ * these gives its `ownMoneyIn` and `rolled` exactly.
+ */
+export function fundingByPurchase(
+  events: ReadonlyArray<CapitalEvent & { id: string }>,
+): Map<string, Funding> {
+  const out = new Map<string, Funding>();
+  let pool = 0;
+  for (const e of inReplayOrder(events)) {
+    if (e.type === "sell") {
+      pool += e.amount;
+      continue;
+    }
+    const fromPool = Math.min(pool, e.amount);
+    pool -= fromPool;
+    out.set(e.id, { fresh: e.amount - fromPool, rolled: fromPool });
+  }
+  return out;
+}

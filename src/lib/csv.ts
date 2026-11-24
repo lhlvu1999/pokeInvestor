@@ -5,7 +5,7 @@
  *  - trailing newline tolerated
  *  - blank lines skipped
  */
-export function parseCsv(input: string): string[][] {
+export function parseCsv(input: string, delimiter = ","): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";
@@ -35,7 +35,7 @@ export function parseCsv(input: string): string[][] {
       i++;
       continue;
     }
-    if (ch === ",") {
+    if (ch === delimiter) {
       row.push(field);
       field = "";
       i++;
@@ -62,4 +62,20 @@ export function parseCsv(input: string): string[][] {
     if (!(row.length === 1 && row[0] === "")) rows.push(row);
   }
   return rows;
+}
+
+/**
+ * Guess the delimiter from the header line: cells copied out of a
+ * spreadsheet are tab-separated, European exports often use semicolons.
+ * Commas win ties (and are the default).
+ */
+export function detectDelimiter(text: string): "," | "\t" | ";" {
+  const first = text.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0] ?? "";
+  const count = (c: string) => first.split(c).length - 1;
+  const tabs = count("\t");
+  const semis = count(";");
+  const commas = count(",");
+  if (tabs > commas && tabs >= semis) return "\t";
+  if (semis > commas) return ";";
+  return ",";
 }

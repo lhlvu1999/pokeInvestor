@@ -28,6 +28,12 @@ export default async function ItemsPage() {
           >
             Export CSV
           </a>
+          <ButtonLink href="/catalog/links" variant="secondary">
+            Link to catalogue
+          </ButtonLink>
+          <ButtonLink href="/stock-count" variant="secondary">
+            Count stock
+          </ButtonLink>
           <BulkPriceRefresh
             targets={refreshTargets.eligible}
             onCooldown={refreshTargets.onCooldown}
