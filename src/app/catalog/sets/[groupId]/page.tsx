@@ -18,6 +18,8 @@ import { changeOver, fromLaunch } from "@/lib/calc/set_history";
 import { changeLabel, COMPARABLE_COVERAGE } from "@/lib/calc/set_list";
 import { describeFx, showUsd, type Fx } from "@/lib/calc/catalog_money";
 import { getDisplayCurrency } from "@/lib/server/settings";
+import { getSetHoldings } from "@/lib/server/set_holdings";
+import { SetHoldingsCard } from "@/components/SetHoldingsCard";
 import { getUsdFx } from "@/lib/server/catalog_fx";
 import { CardsTable } from "./CardsTable";
 import { SetTrackingCard } from "./SetTrackingCard";
@@ -73,11 +75,12 @@ export default async function SetPage({
   const { set, totals, cards, sealed } = detail;
   const productIds = sealed.map((s) => s.productId);
   const currency = await getDisplayCurrency();
-  const [linked, history, sealedHistory, fx] = await Promise.all([
+  const [linked, history, sealedHistory, fx, holdings] = await Promise.all([
     getLinkedItems(productIds),
     getSetHistory(set.groupId),
     getSealedHistory(productIds),
     getUsdFx(currency),
+    getSetHoldings(set.groupId, currency).catch(() => null),
   ]);
   // How this set is tracking against earlier sets at the same age.
   const tracking = await getSetTracking({
@@ -125,6 +128,17 @@ export default async function SetPage({
           Compare with other sets
         </Link>
       </div>
+
+      {holdings && (holdings.held.length > 0 || holdings.soldOut > 0) && (
+        <SetHoldingsCard
+          set={{
+            groupId: set.groupId,
+            name: set.name,
+            language: set.language === "ja" ? "ja" : "en",
+          }}
+          holdings={holdings}
+        />
+      )}
 
       <div
         role="status"

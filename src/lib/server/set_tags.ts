@@ -73,3 +73,19 @@ export async function setTagOfProduct(productId: number): Promise<string | null>
   const r = Array.from(rows)[0];
   return r ? setTagName(r.name, r.language) : null;
 }
+
+/**
+ * What the dashboard needs to tell sets from kinds of product: every set tag in
+ * use, and how many of your old tags could be renamed to their set's name.
+ */
+export async function getTagContext(): Promise<{
+  setTags: string[];
+  readyToMerge: { tag: string; setTag: string }[];
+}> {
+  const items = await loadPlanItems();
+  const setTags = [...new Set(items.flatMap((i) => (i.setTag ? [i.setTag] : [])))];
+  const readyToMerge = planTagMerges(items)
+    .filter((p) => p.strong)
+    .map((p) => ({ tag: p.tag, setTag: p.setTag }));
+  return { setTags, readyToMerge };
+}

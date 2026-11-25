@@ -39,6 +39,8 @@ export type AttentionInput = {
   sell: { count: number; names: string[] };
   /** Held items whose market price has reached their sell target. */
   sellTargets?: { count: number; names: string[] };
+  /** Held items whose market price has fallen to or below their price floor. */
+  floorHits?: { count: number; names: string[] };
   watchlist: { count: number; names: string[] };
   /** Entries that look like slips (see calc/data_checks). */
   dataChecks?: { count: number; freeSales: number };
@@ -71,6 +73,7 @@ export function buildAttentionItems(input: AttentionInput): AttentionItem[] {
     latestPriceAt,
     sell,
     sellTargets,
+    floorHits,
     watchlist,
     dataChecks,
     backup,
@@ -121,6 +124,20 @@ export function buildAttentionItems(input: AttentionInput): AttentionItem[] {
       detail: `${formatMoney(unpriced.costDisplay)} of cost isn't reflected in your value`,
       href: "/items",
       cta: "Update prices",
+    });
+  }
+
+  // 3a. A price you said you wanted to hear about has been reached. It comes
+  //     with the price problems because it is about the same thing: what your
+  //     stock is worth right now. A heads-up about your own threshold, nothing more.
+  if (floorHits && floorHits.count > 0) {
+    items.push({
+      key: "price-floors",
+      tone: "warn",
+      title: `${floorHits.count} ${plural(floorHits.count, "item has", "items have")} fallen to your price floor`,
+      detail: nameList(floorHits.names, floorHits.count),
+      href: "/items",
+      cta: "Review",
     });
   }
 

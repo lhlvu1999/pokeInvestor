@@ -223,6 +223,16 @@ def test_stale_backup_is_flagged_only_when_old():
     assert "Last backup was 31 days ago" in w.build_message(w.compute(inputs([a], last_backup_at=day(31))))
 
 
+def test_price_floor_reached_only_for_held_items_in_the_same_currency():
+    hit = item("Hit", [tx("buy", 30, 1, 1)], [price(1, 500)], floor=(500, "VND"))
+    miss = item("Miss", [tx("buy", 30, 1, 1)], [price(1, 501)], floor=(500, "VND"))
+    sold = item("Sold", [tx("buy", 30, 1, 1), tx("sell", 2, 1, 9)], [price(1, 100)], floor=(500, "VND"))
+    other = item("Other", [tx("buy", 30, 1, 1)], [price(1, 100, "USD")], floor=(500, "VND"))
+    d = w.compute(inputs([hit, miss, sold, other]))
+    assert d.floors == ["Hit"]
+    assert "fallen to your price floor: Hit" in w.build_message(d)
+
+
 def test_message_always_fits_a_chat_message():
     # Many movers with very long names, many flags: still under the limit.
     long = "Extremely Long Product Name " * 6

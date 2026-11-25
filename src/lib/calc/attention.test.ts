@@ -380,3 +380,36 @@ describe("backup row", () => {
     expect(row.title).toBe("Last backup was 30 days ago");
   });
 });
+
+describe("price floor row", () => {
+  const base = {
+    now: new Date("2026-11-24T00:00:00Z"),
+    formatMoney: (m: number) => String(m),
+    pending: null,
+    unpriced: { count: 0, costDisplay: 0 },
+    latestPriceAt: null,
+    sell: { count: 0, names: [] },
+    watchlist: { count: 0, names: [] },
+  };
+  it("is absent when nothing has fallen to a floor", () => {
+    expect(buildAttentionItems({ ...base, floorHits: { count: 0, names: [] } })).toEqual([]);
+  });
+  it("names the items, with singular and plural wording", () => {
+    const [one] = buildAttentionItems({ ...base, floorHits: { count: 1, names: ["ETB"] } });
+    expect(one).toMatchObject({ key: "price-floors", tone: "warn", title: "1 item has fallen to your price floor", detail: "ETB", href: "/items" });
+    const [many] = buildAttentionItems({ ...base, floorHits: { count: 4, names: ["A", "B", "C", "D"] } });
+    expect(many.title).toBe("4 items have fallen to your price floor");
+    expect(many.detail).toBe("A, B +2 more");
+  });
+  it("sits with the price problems, ahead of the signals to look at", () => {
+    const rows = buildAttentionItems({
+      ...base,
+      unpriced: { count: 2, costDisplay: 10 },
+      sell: { count: 1, names: ["X"] },
+      floorHits: { count: 1, names: ["ETB"] },
+    });
+    const keys = rows.map((r) => r.key);
+    expect(keys.indexOf("unpriced")).toBeLessThan(keys.indexOf("price-floors"));
+    expect(keys.indexOf("price-floors")).toBeLessThan(keys.indexOf("sell"));
+  });
+});

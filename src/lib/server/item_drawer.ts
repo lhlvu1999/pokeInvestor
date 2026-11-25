@@ -4,6 +4,7 @@ import type { DrawerPoint, DrawerTrade } from "@/lib/calc/item_drawer";
 import { getItemDetail } from "./items";
 import { getItemPriceHistory } from "./price_analytics";
 import { getDisplayCurrency } from "./settings";
+import { getItemSetLink, getSetHoldings } from "./set_holdings";
 
 /**
  * Everything the item drawer shows, already in the display currency and
@@ -36,11 +37,46 @@ export type ItemDrawerData = {
     total: number;
     pending: boolean;
   }[];
+  /** The catalogue set this item belongs to, with what you hold in it. Null when unlinked. */
+  set: {
+    groupId: number;
+    name: string;
+    itemsHeld: number;
+    units: number;
+    value: number;
+    currency: string;
+  } | null;
 };
 
 const RECENT_LIMIT = 5;
 
 export async function getItemDrawerData(
+  id: string,
+): Promise<ItemDrawerData | null> {
+  const core = await drawerCore(id);
+  if (!core) return null;
+  // The set link is a bonus: if it cannot be worked out the drawer still opens.
+  try {
+    const detail = await getItemDetail(id);
+    const link = detail ? await getItemSetLink(detail.item) : null;
+    if (link) {
+      const h = await getSetHoldings(link.groupId, await getDisplayCurrency());
+      core.set = {
+        groupId: link.groupId,
+        name: link.name,
+        itemsHeld: h.held.length,
+        units: h.units,
+        value: h.value,
+        currency: h.currency,
+      };
+    }
+  } catch {
+    // leave it null
+  }
+  return core;
+}
+
+async function drawerCore(
   id: string,
 ): Promise<ItemDrawerData | null> {
   const [detail, history, displayCurrency] = await Promise.all([
@@ -149,5 +185,6 @@ function build(
     })),
     trades,
     recent,
+    set: null,
   };
 }

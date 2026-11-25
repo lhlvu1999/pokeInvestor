@@ -65,3 +65,80 @@ export async function applySetTagMerge(
     data: { renamed: result.renamed, added: result.added, full: result.full, conflicts },
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Remove or rename one tag everywhere                                 */
+/* ------------------------------------------------------------------ */
+
+type TagRow = { id: string; tags: string[] };
+
+function cleanTag(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const t = raw.trim().toLowerCase();
+  return t.length > 0 && t.length <= MAX_TAG_LENGTH ? t : null;
+}
+
+/** Items that carry `tag`, with their tags as stored. */
+async function carriers(tag: string): Promise<TagRow[]> {
+  const rows = await db.execute<TagRow>(sql`
+    SELECT id::text AS id, tags FROM items WHERE ${tag} = ANY(tags)
+  `);
+  return Array.from(rows).map((r) => ({ id: r.id, tags: r.tags ?? [] }));
+}
+
+async function writeTags(changes: { id: string; before: string[]; after: string[] }[]): Promise<number> {
+  let written = 0;
+  await db.transaction(async (tx) => {
+    for (const c of changes) {
+      // Only if the item's tags are still what they were when read.
+      const rows = await tx.execute(sql`
+        UPDATE items
+           SET tags = ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(c.after)}::jsonb))
+         WHERE id = ${c.id}::uuid
+           AND tags = ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(c.before)}::jsonb))
+        RETURNING id
+      `);
+      if (Array.from(rows).length > 0) written += 1;
+    }
+  });
+  for (const p of ["/", "/items", "/items/tags", "/analytics", "/analytics/exposure"]) revalidatePath(p);
+  return written;
+}
+
+/** Take a tag off every item that carries it. The items themselves are untouched. */
+export async function removeTagEverywhere(
+  tag: string,
+): Promise<ActionResult<{ items: number }>> {
+  const t = cleanTag(tag);
+  if (!t) return { ok: false, error: "Invalid tag" };
+  const rows = await carriers(t);
+  const written = await writeTags(
+    rows.map((r) => ({ id: r.id, before: r.tags, after: r.tags.filter((x) => x !== t) })),
+  );
+  return { ok: true, data: { items: written } };
+}
+
+/**
+ * Rename a tag everywhere, or merge it into another tag that already exists: an item
+ * that carries both ends up with the new one once. The new name is normalized like
+ * any tag (trimmed, lower-case, at most 40 characters).
+ */
+export async function renameTagEverywhere(
+  tag: string,
+  newTag: string,
+): Promise<ActionResult<{ items: number; into: string }>> {
+  const from = cleanTag(tag);
+  const to = cleanTag(newTag);
+  if (!from) return { ok: false, error: "Invalid tag" };
+  if (!to) return { ok: false, error: `Give a name of 1 to ${MAX_TAG_LENGTH} characters.` };
+  if (from === to) return { ok: false, error: "That is the same tag." };
+  const rows = await carriers(from);
+  const written = await writeTags(
+    rows.map((r) => ({
+      id: r.id,
+      before: r.tags,
+      after: [...new Set(r.tags.map((x) => (x === from ? to : x)))],
+    })),
+  );
+  return { ok: true, data: { items: written, into: to } };
+}

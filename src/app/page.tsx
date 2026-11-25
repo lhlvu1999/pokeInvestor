@@ -7,7 +7,7 @@ import { CashflowTagFilter } from "@/components/CashflowTagFilter";
 import { CashflowExplorer } from "@/components/dashboard/CashflowExplorer";
 import { currentMonthKey, parseRangeParams } from "@/lib/calc/cashflow_window";
 import { CollapsibleRows } from "@/components/CollapsibleRows";
-import { ConcentrationHeatmap } from "@/components/ConcentrationHeatmap";
+import { ConcentrationPanel } from "@/components/dashboard/ConcentrationPanel";
 import { TagBadge } from "@/components/TagBadge";
 import { AttentionPanel } from "@/components/dashboard/AttentionPanel";
 import { CapitalCard } from "@/components/dashboard/CapitalCard";
@@ -28,6 +28,7 @@ import {
 import { getCapitalFlow } from "@/lib/server/capital";
 import { getAnnualizedReturn } from "@/lib/server/annualized";
 import { getSellTargetHits } from "@/lib/server/sell_target_hits";
+import { getPriceFloorHits } from "@/lib/server/price_floor_hits";
 import { getDataIssues } from "@/lib/server/data_checks";
 import { getLastBackupAt } from "@/lib/server/backup";
 import { daysSinceBackup } from "@/lib/calc/backup";
@@ -39,6 +40,7 @@ import {
 } from "@/lib/server/price_analytics";
 import { getPendingDeliveries } from "@/lib/server/pending";
 import { safe } from "@/lib/server/safe";
+import { getTagContext } from "@/lib/server/set_tags";
 import { getSellCandidates } from "@/lib/server/sell_scorecard";
 import { getCostMethod, getDisplayCurrency } from "@/lib/server/settings";
 import { listWatchlist } from "@/lib/server/watchlist";
@@ -48,7 +50,7 @@ import { listWatchlist } from "@/lib/server/watchlist";
  * about what counts as a strong signal. */
 const SELL_SIGNAL_MIN_SCORE = 0.6;
 /** Tag rows shown before the rest collapse behind "Show more". */
-const TAG_ROWS_VISIBLE = 8;
+const TAG_ROWS_VISIBLE = 6;
 
 function formatRateLine(
   notes: { from: string; to: string; rate: number; stale: boolean }[],
@@ -113,8 +115,10 @@ export default async function DashboardPage({
     capital,
     annualized,
     sellTargetHits,
+    floorHitList,
     dataIssues,
     lastBackupAt,
+    tagContext,
   ] = await Promise.all([
     getCashflowLines(displayCurrency, { itemIdsFilter: cashflowItemIds }),
     getPortfolioValueSeries(displayCurrency),
@@ -142,8 +146,10 @@ export default async function DashboardPage({
       null,
     ),
     safe("sell targets", () => getSellTargetHits(), []),
+    safe("price floors", () => getPriceFloorHits(), []),
     safe("data checks", () => getDataIssues(), []),
     safe("last backup", () => getLastBackupAt(), null),
+    safe("tag context", () => getTagContext(), { setTags: [], readyToMerge: [] }),
   ]);
 
   const now = new Date();
@@ -179,6 +185,10 @@ export default async function DashboardPage({
       count: sellTargetHits.length,
       names: sellTargetHits.map((h) => h.name),
     },
+    floorHits: {
+      count: floorHitList.length,
+      names: floorHitList.map((h) => h.name),
+    },
     watchlist: {
       count: bullishWatch.length,
       names: bullishWatch.map((r) => r.entry.name),
@@ -198,7 +208,7 @@ export default async function DashboardPage({
   const showCapital = capital != null && capital.flow.spent > 0;
   const showAnnualized =
     annualized != null && annualized.report.status !== "none";
-  const showSideColumn = tagRollup.length > 0 || showCapital || showAnnualized;
+  const showReturns = showCapital || showAnnualized || tagRollup.length > 0;
 
   // All tags that appear on any item — surface as chips above the chart.
   const allTags = Array.from(
@@ -230,6 +240,7 @@ export default async function DashboardPage({
           <BulkPriceRefresh
             targets={refreshTargets.eligible}
             onCooldown={refreshTargets.onCooldown}
+            tcg={refreshTargets.tcg}
           />
           <ButtonLink href="/transactions/new">Add transaction</ButtonLink>
         </div>
@@ -276,15 +287,18 @@ export default async function DashboardPage({
             />
           </div>
 
-          {/* 4 — How did I get here. Reference material, so it sits below
-              the answers. Cashflow gets the left column; the tag breakdowns
-              stack beside it, so nothing runs edge to edge. */}
+          {/* 4 — How did I get here. Reference material, so it sits below the
+              answers. Cashflow takes two thirds (wide enough for its biggest
+              purchases and sales to sit side by side); the return and the
+              money behind it stack in the third beside it. */}
           <div
             className={`grid grid-cols-1 gap-4 items-start ${
-              showSideColumn ? "lg:grid-cols-2" : ""
+              showReturns ? "lg:grid-cols-3" : ""
             }`}
           >
-            <div className="min-w-0">
+            <div
+              className={`min-w-0 flex flex-col gap-4 ${showReturns ? "lg:col-span-2" : ""}`}
+            >
               <CashflowExplorer
                 lines={cashflowData.lines}
                 bounds={cashflowData.bounds}
@@ -308,8 +322,85 @@ export default async function DashboardPage({
                   />
                 }
               />
+              {tagRollup.length > 0 && (
+                <Card className="overflow-hidden">
+                  <div className="p-4 border-b border-zinc-200/80 dark:border-zinc-800 flex items-baseline justify-between gap-2 flex-wrap">
+                    <h2 className="font-medium text-sm">
+                      By tag{" "}
+                      <span className="text-xs text-zinc-500 font-normal">
+                        sorted by total spent
+                      </span>
+                    </h2>
+                    <span
+                      className="text-[11px] text-zinc-500"
+                      title="Items can have several tags, so totals across tags can exceed the portfolio total."
+                    >
+                      items can have several tags
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="text-xs uppercase tracking-wide text-zinc-500 border-b border-zinc-200/80 dark:border-zinc-800">
+                        <tr>
+                          <th className="px-2 xl:px-3 py-2 text-left font-medium">
+                            Tag
+                          </th>
+                          <th
+                            className="px-2 xl:px-3 py-2 text-right font-medium"
+                            title="In stock / total items with this tag"
+                          >
+                            Stock
+                          </th>
+                          <th className="px-2 xl:px-3 py-2 text-right font-medium">
+                            Spent
+                          </th>
+                          <th className="hidden xl:table-cell px-2 xl:px-3 py-2 text-right font-medium">
+                            Received
+                          </th>
+                          <th className="px-2 xl:px-3 py-2 text-right font-medium">
+                            Realized
+                          </th>
+                          <th
+                            className="px-2 xl:px-3 py-2 text-right font-medium"
+                            title="Realized profit ÷ total spent"
+                          >
+                            Margin
+                          </th>
+                          <th className="px-2 xl:px-3 py-2 text-right font-medium">
+                            Stock value
+                          </th>
+                        </tr>
+                      </thead>
+                      <CollapsibleRows
+                        visible={tagRollup
+                          .slice(0, TAG_ROWS_VISIBLE)
+                          .map((r) => (
+                            <TagRow
+                              key={r.tag}
+                              r={r}
+                              currency={displayCurrency}
+                            />
+                          ))}
+                        hidden={tagRollup.slice(TAG_ROWS_VISIBLE).map((r) => (
+                          <TagRow
+                            key={r.tag}
+                            r={r}
+                            currency={displayCurrency}
+                          />
+                        ))}
+                        hiddenCount={Math.max(
+                          0,
+                          tagRollup.length - TAG_ROWS_VISIBLE,
+                        )}
+                        colSpan={7}
+                        noun="tags"
+                      />
+                    </table>
+                  </div>
+                </Card>
+              )}
             </div>
-            {showSideColumn && (
+            {showReturns && (
               <div className="min-w-0 flex flex-col gap-4">
                 {showAnnualized && (
                   <AnnualizedCard
@@ -328,98 +419,13 @@ export default async function DashboardPage({
                   />
                 )}
                 {tagRollup.length > 0 && (
-                  <Card className="p-4">
-                    <div className="flex items-baseline justify-between flex-wrap gap-2 mb-3">
-                      <h2 className="font-medium text-sm">
-                        Concentration{" "}
-                        <span className="text-xs text-zinc-500 font-normal">
-                          inventory value by tag
-                        </span>
-                      </h2>
-                    </div>
-                    <ConcentrationHeatmap
-                      rollup={tagRollup}
-                      currency={displayCurrency}
-                    />
-                  </Card>
-                )}
-
-                {tagRollup.length > 0 && (
-                  <Card className="overflow-hidden">
-                    <div className="p-4 border-b border-zinc-200/80 dark:border-zinc-800 flex items-baseline justify-between gap-2 flex-wrap">
-                      <h2 className="font-medium text-sm">
-                        By tag{" "}
-                        <span className="text-xs text-zinc-500 font-normal">
-                          sorted by total spent
-                        </span>
-                      </h2>
-                      <span
-                        className="text-[11px] text-zinc-500"
-                        title="Items can have several tags, so totals across tags can exceed the portfolio total."
-                      >
-                        items can have several tags
-                      </span>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="text-xs uppercase tracking-wide text-zinc-500 border-b border-zinc-200/80 dark:border-zinc-800">
-                          <tr>
-                            <th className="px-2 xl:px-3 py-2 text-left font-medium">
-                              Tag
-                            </th>
-                            <th
-                              className="px-2 xl:px-3 py-2 text-right font-medium"
-                              title="In stock / total items with this tag"
-                            >
-                              Stock
-                            </th>
-                            <th className="px-2 xl:px-3 py-2 text-right font-medium">
-                              Spent
-                            </th>
-                            <th className="hidden xl:table-cell px-2 xl:px-3 py-2 text-right font-medium">
-                              Received
-                            </th>
-                            <th className="px-2 xl:px-3 py-2 text-right font-medium">
-                              Realized
-                            </th>
-                            <th
-                              className="px-2 xl:px-3 py-2 text-right font-medium"
-                              title="Realized profit ÷ total spent"
-                            >
-                              Margin
-                            </th>
-                            <th className="px-2 xl:px-3 py-2 text-right font-medium">
-                              Stock value
-                            </th>
-                          </tr>
-                        </thead>
-                        <CollapsibleRows
-                          visible={tagRollup
-                            .slice(0, TAG_ROWS_VISIBLE)
-                            .map((r) => (
-                              <TagRow
-                                key={r.tag}
-                                r={r}
-                                currency={displayCurrency}
-                              />
-                            ))}
-                          hidden={tagRollup.slice(TAG_ROWS_VISIBLE).map((r) => (
-                            <TagRow
-                              key={r.tag}
-                              r={r}
-                              currency={displayCurrency}
-                            />
-                          ))}
-                          hiddenCount={Math.max(
-                            0,
-                            tagRollup.length - TAG_ROWS_VISIBLE,
-                          )}
-                          colSpan={7}
-                          noun="tags"
-                        />
-                      </table>
-                    </div>
-                  </Card>
+                  <ConcentrationPanel
+                    tags={tagRollup}
+                    portfolioCost={summary.invested}
+                    currency={displayCurrency}
+                    setTags={tagContext.setTags}
+                    oldNicknames={tagContext.readyToMerge}
+                  />
                 )}
               </div>
             )}

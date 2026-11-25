@@ -6,10 +6,10 @@ import type { PricedPosition } from "@/lib/server/price_analytics";
 /**
  * "What's moving?" — the biggest recent price changes among what you hold.
  *
- * These are changes in eBay ASKING prices, which are noisy for one-off
- * items (graded slabs especially: two listings of the same card can sit
- * 30% apart). The subtitle says so, because a -39% on a single slab is a
- * reason to look, not a verdict.
+ * Prices are estimates, and noisy for one-off items (graded slabs
+ * especially: two eBay listings of the same card can sit 30% apart). The
+ * subtitle says so, because a -39% on a single slab is a reason to look, not
+ * a verdict.
  */
 export function MoversPanel({
   gainers,
@@ -28,7 +28,7 @@ export function MoversPanel({
         <h2 className="font-medium text-sm">
           Biggest moves{" "}
           <span className="text-xs text-zinc-500 font-normal">
-            last ~{windowDays}d · asking prices
+            last ~{windowDays}d · price estimates
           </span>
         </h2>
       </div>

@@ -9,7 +9,7 @@ import { items as itemsTable } from "@/db/schema";
 import { getItemDetail, listAllTags } from "@/lib/server/items";
 import { ItemThumb } from "@/components/ItemThumb";
 import { Money } from "@/components/Money";
-import { ButtonLink, Card, EmptyState, StatCard } from "@/components/ui";
+import { ButtonLink, Card, EmptyState } from "@/components/ui";
 import { MarketPriceForm } from "./MarketPriceForm";
 import { DeleteTransactionButton } from "./DeleteTransactionButton";
 import { MoreMenu } from "@/components/MoreMenu";
@@ -43,6 +43,11 @@ import { LifecycleCard } from "@/components/LifecycleCard";
 import { ReturnBasisCard } from "@/components/ReturnBasisCard";
 import { sellTargetStanding } from "@/lib/calc/sell_target";
 import { SellTargetCard } from "./SellTargetCard";
+import { PriceFloorCard } from "./PriceFloorCard";
+import { SetHoldingsCard } from "@/components/SetHoldingsCard";
+import { getItemSetLink, getSetHoldings } from "@/lib/server/set_holdings";
+import { getDisplayCurrency } from "@/lib/server/settings";
+import { floorStanding } from "@/lib/calc/price_floor";
 import { BASES, parseBasis, type Basis } from "@/lib/calc/position_return";
 import { getItemReturns } from "@/lib/server/position_returns";
 import { getRate } from "@/lib/fx";
@@ -87,6 +92,10 @@ export default async function ItemDetailPage({
       : null;
   // Annualized return on each starting basis.
   const returns = await getItemReturns(id, new Date()).catch(() => null);
+  const setLink = await getItemSetLink(item).catch(() => null);
+  const setHoldings = setLink
+    ? await getSetHoldings(setLink.groupId, await getDisplayCurrency()).catch(() => null)
+    : null;
   const basisHrefs = Object.fromEntries(
     BASES.map((b) => [b, b === "purchase" ? `/items/${id}` : `/items/${id}?basis=${b}`]),
   ) as Record<Basis, string>;
@@ -192,9 +201,14 @@ export default async function ItemDetailPage({
                 knownTags={knownTags}
               />
             </div>
-            <div className="mt-3">
-              <AliasEditor itemId={item.id} initialAliases={item.aliases} />
-            </div>
+            <details className="mt-2 group">
+              <summary className="cursor-pointer select-none text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+                Aliases{item.aliases.length > 0 ? ` (${item.aliases.length})` : ""}
+              </summary>
+              <div className="mt-2">
+                <AliasEditor itemId={item.id} initialAliases={item.aliases} />
+              </div>
+            </details>
             {item.note && (
               <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400 max-w-prose">
                 {item.note}
@@ -257,32 +271,78 @@ export default async function ItemDetailPage({
         </div>
       </div>
 
-      <PlainEnglish lines={summaryLines} />
+      {/* The set it belongs to, what you hold in it, and the way to its analytics. */}
+      {setLink && setHoldings && (
+        <SetHoldingsCard set={setLink} holdings={setHoldings} currentItemId={item.id} compact />
+      )}
 
+      {/* Everything you check first, in one card: the numbers beside what they mean. */}
+      <Card className="p-4">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-x-8 gap-y-5">
+          <div className="lg:col-span-3 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-4 content-start">
+            <Stat label="Held">
+              <span className="tabular-nums">{valuation.quantity}</span>
+            </Stat>
+            <Stat
+              label="Market price"
+              hint={
+                latestPrice
+                  ? `${priceSourceLabel(latestPrice.source)} · ${new Date(latestPrice.fetchedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+                  : "No price yet"
+              }
+            >
+              <Money
+                amount={latestPrice?.priceCents ?? null}
+                currency={latestPrice?.currency ?? null}
+              />
+            </Stat>
+            <Stat label="Avg cost" hint="Per remaining unit">
+              <Money amount={valuation.avgCostCents} currency={valuation.currency} />
+            </Stat>
+            <Stat label="Unrealized" hint="Held units at market">
+              <Money amount={valuation.unrealizedProfitCents} currency={valuation.currency} signed />
+            </Stat>
+            <Stat label="Realized" hint="From units sold">
+              <Money amount={valuation.realizedProfitCents} currency={valuation.currency} signed />
+            </Stat>
+            <Stat label="Inventory cost" hint="Held × avg cost">
+              <Money amount={valuation.inventoryCostCents} currency={valuation.currency} />
+            </Stat>
+            <Stat label="Total spent" hint="Lifetime cost of all buys">
+              <Money amount={valuation.totalBoughtCents} currency={valuation.currency} />
+            </Stat>
+            <Stat label="Total received" hint="Lifetime revenue from sells">
+              <Money amount={valuation.totalSoldCents} currency={valuation.currency} />
+            </Stat>
+            {valuation.pendingQuantity > 0 && (
+              <Stat label="On the way" hint={`${valuation.pendingQuantity} unit(s) committed`}>
+                <Money amount={valuation.pendingCostCents} currency={valuation.currency} />
+              </Stat>
+            )}
+            {valuation.totalShippingCents > 0 && (
+              <Stat label="Total shipping" hint="Lifetime shipping recorded">
+                <Money amount={valuation.totalShippingCents} currency={valuation.currency} />
+              </Stat>
+            )}
+          </div>
+          <div className="lg:col-span-2 lg:border-l lg:border-zinc-200 lg:dark:border-zinc-800 lg:pl-8">
+            <PlainEnglish lines={summaryLines} />
+          </div>
+        </div>
+      </Card>
+
+      {/* Price and the two alerts you can set on it, side by side. */}
+      <div className={`grid grid-cols-1 gap-4 [&>*]:h-full ${catalogInfo ? "lg:grid-cols-3" : "lg:grid-cols-2"}`}>
       {catalogInfo && (
         <CatalogCard
           info={catalogInfo}
           itemCurrency={itemCurrency}
           usdToItem={usdToItem}
-          ebayPriceMinor={latestPrice?.priceCents ?? null}
-        />
-      )}
-
-      {returns && returns.results.purchase.status !== "unavailable" && (
-        <ReturnBasisCard
-          results={returns.results}
-          basis={basis}
-          hrefs={basisHrefs}
-          currency={returns.currency}
-          vsIndex={returns.vsIndex}
-          benchLabel={returns.benchLabel}
-        />
-      )}
-
-      {lifecycle && (
-        <LifecycleCard
-          lifecycle={lifecycle}
-          releasedOn={lifecycle.releasedOn}
+          // Only worth comparing when the item's own price is not TCGplayer's.
+          ebayPriceMinor={
+            latestPrice && latestPrice.source !== "tcgplayer" ? latestPrice.priceCents : null
+          }
+          priceLabel={latestPrice ? priceSourceLabel(latestPrice.source) : ""}
         />
       )}
 
@@ -309,73 +369,52 @@ export default async function ItemDetailPage({
         held={valuation.quantity}
       />
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-        <StatCard label="Held">
-          <span className="tabular-nums">{valuation.quantity}</span>
-        </StatCard>
-        <StatCard label="Avg cost" hint="Per remaining unit">
-          <Money
-            amount={valuation.avgCostCents}
-            currency={valuation.currency}
-          />
-        </StatCard>
-        <StatCard label="Market price">
-          <Money
-            amount={latestPrice?.priceCents ?? null}
-            currency={latestPrice?.currency ?? null}
-          />
-        </StatCard>
-        <StatCard label="Inventory cost" hint="Held × avg cost">
-          <Money
-            amount={valuation.inventoryCostCents}
-            currency={valuation.currency}
-          />
-        </StatCard>
-        <StatCard label="Total spent" hint="Lifetime cost of all buys">
-          <Money
-            amount={valuation.totalBoughtCents}
-            currency={valuation.currency}
-          />
-        </StatCard>
-        <StatCard label="Total received" hint="Lifetime revenue from sells">
-          <Money
-            amount={valuation.totalSoldCents}
-            currency={valuation.currency}
-          />
-        </StatCard>
-        <StatCard label="Realized">
-          <Money
-            amount={valuation.realizedProfitCents}
-            currency={valuation.currency}
-            signed
-          />
-        </StatCard>
-        <StatCard label="Unrealized">
-          <Money
-            amount={valuation.unrealizedProfitCents}
-            currency={valuation.currency}
-            signed
-          />
-        </StatCard>
-        {valuation.pendingQuantity > 0 && (
-          <StatCard
-            label="On the way"
-            hint={`${valuation.pendingQuantity} unit(s) committed`}
-          >
-            <Money
-              amount={valuation.pendingCostCents}
-              currency={valuation.currency}
-            />
-          </StatCard>
-        )}
-        {valuation.totalShippingCents > 0 && (
-          <StatCard label="Total shipping" hint="Lifetime shipping recorded">
-            <Money
-              amount={valuation.totalShippingCents}
-              currency={valuation.currency}
-            />
-          </StatCard>
-        )}
+      <PriceFloorCard
+        itemId={item.id}
+        currency={itemCurrency}
+        floorCents={item.floorCents}
+        standing={floorStanding({
+          floorCents: item.floorCents,
+          floorCurrency: item.floorCurrency,
+          priceCents: latestPrice?.priceCents ?? null,
+          priceCurrency: latestPrice?.currency ?? null,
+        })}
+        alertedLabel={
+          item.floorAlertedAt
+            ? item.floorAlertedAt.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+                timeZone: "UTC",
+              })
+            : null
+        }
+        held={valuation.quantity}
+        avgCostCents={valuation.quantity > 0 ? valuation.avgCostCents : 0}
+      />
+
+      </div>
+
+      {/* How it has done, and where the product is in its life. */}
+      <div className={`grid grid-cols-1 gap-4 [&>*]:h-full ${returns && returns.results.purchase.status !== "unavailable" && lifecycle ? "lg:grid-cols-2" : ""}`}>
+      {returns && returns.results.purchase.status !== "unavailable" && (
+        <ReturnBasisCard
+          results={returns.results}
+          basis={basis}
+          hrefs={basisHrefs}
+          currency={returns.currency}
+          vsIndex={returns.vsIndex}
+          benchLabel={returns.benchLabel}
+        />
+      )}
+
+      {lifecycle && (
+        <LifecycleCard
+          lifecycle={lifecycle}
+          releasedOn={lifecycle.releasedOn}
+        />
+      )}
+
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -518,45 +557,50 @@ export default async function ItemDetailPage({
 
         <Card className="p-4 h-fit space-y-4">
           <div>
-            <h2 className="font-medium mb-2">Market price</h2>
-            <p className="text-xs text-zinc-500 mb-3">
-              Manually set the current market price per unit, or fetch it from
-              PriceCharting if you&apos;ve configured an API token + product ID.
-            </p>
-            <MarketPriceForm
-              itemId={item.id}
-              currentMinor={latestPrice?.priceCents ?? null}
-              currency={latestPrice?.currency ?? itemCurrency}
-              currencyLocked={Boolean(valuation.currency)}
-            />
-          </div>
-          {item.pricechartingId && (
-            <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800">
-              <div className="text-xs text-zinc-500 mb-2">
-                PriceCharting ID:{" "}
-                <span className="font-mono">{item.pricechartingId}</span>
-              </div>
-              <RefreshPriceButton itemId={item.id} />
-            </div>
-          )}
-          <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800">
-            <EbayPricePanel itemId={item.id} initialQuery={item.ebayQuery} />
-          </div>
-          <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800">
-            <h3 className="text-xs uppercase tracking-wider text-zinc-500 mb-2">
-              Price history
-            </h3>
+            <h2 className="font-medium mb-2">Price history</h2>
             <PriceHistoryChart
               points={priceHistory.points}
               currency={priceHistory.currency ?? itemCurrency}
             />
+            {latestPrice?.source && latestPrice.source !== "manual" && (
+              <div className="mt-2 text-xs text-zinc-500">
+                Latest price: {priceSourceLabel(latestPrice.source)} ·{" "}
+                {new Date(latestPrice.fetchedAt).toLocaleString()}
+              </div>
+            )}
           </div>
-          {latestPrice?.source && latestPrice.source !== "manual" && (
-            <div className="text-xs text-zinc-500">
-              Latest price source: {latestPrice.source} ·{" "}
-              {new Date(latestPrice.fetchedAt).toLocaleString()}
+          <details className="pt-3 border-t border-zinc-200 dark:border-zinc-800">
+            <summary className="cursor-pointer select-none text-sm font-medium">
+              Update the price
+            </summary>
+            <div className="mt-3 space-y-4">
+              <div>
+                <p className="text-xs text-zinc-500 mb-3">
+                  Set the current market price per unit yourself. Items linked to
+                  the catalogue are priced from TCGplayer when you run Update all
+                  prices; the rest use eBay.
+                </p>
+                <MarketPriceForm
+                  itemId={item.id}
+                  currentMinor={latestPrice?.priceCents ?? null}
+                  currency={latestPrice?.currency ?? itemCurrency}
+                  currencyLocked={Boolean(valuation.currency)}
+                />
+              </div>
+              {item.pricechartingId && (
+                <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800">
+                  <div className="text-xs text-zinc-500 mb-2">
+                    PriceCharting ID:{" "}
+                    <span className="font-mono">{item.pricechartingId}</span>
+                  </div>
+                  <RefreshPriceButton itemId={item.id} />
+                </div>
+              )}
+              <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800">
+                <EbayPricePanel itemId={item.id} initialQuery={item.ebayQuery} />
+              </div>
             </div>
-          )}
+          </details>
         </Card>
       </div>
 
@@ -579,7 +623,7 @@ function PlainEnglish({ lines }: { lines: SummaryLine[] }) {
     .map((g) => lines.filter((l) => l.group === g))
     .filter((g) => g.length > 0);
   return (
-    <Card className="p-4">
+    <div>
       <h2 className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">
         In plain English
       </h2>
@@ -600,8 +644,38 @@ function PlainEnglish({ lines }: { lines: SummaryLine[] }) {
           </p>
         ))}
       </div>
-    </Card>
+    </div>
   );
+}
+
+/** A compact figure for the overview card: label, value, small caption. */
+function Stat({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">
+        {label}
+      </div>
+      <div className="mt-1 text-xl font-semibold tabular-nums leading-tight">
+        {children}
+      </div>
+      {hint && <div className="text-[11px] text-zinc-500 mt-0.5 truncate">{hint}</div>}
+    </div>
+  );
+}
+
+function priceSourceLabel(source: string): string {
+  if (source === "tcgplayer") return "TCGplayer";
+  if (source === "ebay") return "eBay asking";
+  if (source === "pricecharting") return "PriceCharting";
+  return "Set by you";
 }
 
 const usdText = (cents: number) =>
@@ -619,11 +693,13 @@ function CatalogCard({
   itemCurrency,
   usdToItem,
   ebayPriceMinor,
+  priceLabel,
 }: {
   info: NonNullable<Awaited<ReturnType<typeof getItemCatalogInfo>>>;
   itemCurrency: string;
   usdToItem: number | null;
   ebayPriceMinor: number | null;
+  priceLabel: string;
 }) {
   const latest = info.latest;
   const change =
@@ -694,7 +770,7 @@ function CatalogCard({
       <p className="mt-2 text-xs text-zinc-500">
         {asOf ? `As of ${asOf}. ` : ""}
         {vsEbay != null
-          ? `Your eBay price is ${Math.abs(vsEbay).toFixed(0)}% ${vsEbay >= 0 ? "above" : "below"} it. `
+          ? `Your ${priceLabel} price is ${Math.abs(vsEbay).toFixed(0)}% ${vsEbay >= 0 ? "above" : "below"} it. `
           : ""}
         {info.url && (
           <a

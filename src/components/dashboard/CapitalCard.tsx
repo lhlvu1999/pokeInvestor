@@ -99,26 +99,31 @@ export function CapitalCard({
         </Tile>
       </dl>
 
-      <div className="mt-4 flex items-center gap-4 text-xs text-zinc-500">
-        <Key color="bg-sky-500" label="New money" />
-        <Key color="bg-emerald-500" label="Rolled over from sales" />
-        <span className="ml-auto hidden sm:inline">hover a bar</span>
-      </div>
+      <details className="mt-4">
+        <summary className="cursor-pointer select-none text-xs text-sky-700 dark:text-sky-400 hover:underline">
+          Month by month
+        </summary>
+        <div className="mt-3 flex items-center gap-4 text-xs text-zinc-500">
+          <Key color="bg-sky-500" label="New money" />
+          <Key color="bg-emerald-500" label="Rolled over from sales" />
+          <span className="ml-auto hidden sm:inline">hover a bar</span>
+        </div>
 
-      <div className="hidden sm:block">
-        <Chart
-          months={lastMonths(flow.months, MONTHS_WIDE)}
-          width={W_WIDE}
-          currency={currency}
-        />
-      </div>
-      <div className="sm:hidden">
-        <Chart
-          months={lastMonths(flow.months, MONTHS_NARROW)}
-          width={W_NARROW}
-          currency={currency}
-        />
-      </div>
+        <div className="hidden sm:block">
+          <Chart
+            months={lastMonths(flow.months, MONTHS_WIDE)}
+            width={W_WIDE}
+            currency={currency}
+          />
+        </div>
+        <div className="sm:hidden">
+          <Chart
+            months={lastMonths(flow.months, MONTHS_NARROW)}
+            width={W_NARROW}
+            currency={currency}
+          />
+        </div>
+      </details>
 
       <p className="mt-2 text-[11px] text-zinc-500 leading-relaxed">
         Sale proceeds are pooled across all items and spent on the next

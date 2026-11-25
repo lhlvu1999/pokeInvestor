@@ -22,6 +22,7 @@ from poke_pipeline import (
     catalog_link,
     discover,
     extract,
+    floor_alerts,
     price_refresh,
     sell_alerts,
     stage_alerts,
@@ -183,12 +184,18 @@ def cmd_watchlist_alerts(
         "--sell/--no-sell",
         help="Also run the sell-target alerts (see sell-alerts).",
     ),
+    floor: bool = typer.Option(
+        True,
+        "--floor/--no-floor",
+        help="Also run the price-floor alerts (see floor-alerts).",
+    ),
 ) -> None:
     """Alert (via ALERT_WEBHOOK_URL) when a watchlist item's market price
     reaches its buy target. One alert per crossing; re-arms when the price
     climbs back above target. Also sends the opt-in "usual low point" alerts
-    (--no-stage to skip them) and the sell-target alerts for items you hold
-    (--no-sell to skip them). Run it daily.
+    (--no-stage to skip them), the sell-target alerts for items you hold
+    (--no-sell to skip them) and the price-floor alerts (--no-floor to skip
+    them). Run it daily.
     """
     try:
         r = watchlist_alerts.run(dry_run=dry_run)
@@ -208,6 +215,35 @@ def cmd_watchlist_alerts(
                 f"sell-alerts: {x.checked} checked, {x.alerted} alerted, "
                 f"{x.rearmed} re-armed, {x.skipped} skipped (nothing held, or currency mismatch)"
             )
+        if floor:
+            f = floor_alerts.run(dry_run=dry_run)
+            typer.echo(
+                f"floor-alerts: {f.checked} checked, {f.alerted} alerted, "
+                f"{f.rearmed} re-armed, {f.skipped} skipped (nothing held, or currency mismatch)"
+            )
+    finally:
+        close_pool()
+
+
+@app.command("floor-alerts")
+def cmd_floor_alerts(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print what would be sent; post nothing and change nothing.",
+    ),
+) -> None:
+    """Alert (via ALERT_WEBHOOK_URL) when an item you hold falls to or below the
+    price floor set on its page. One alert per crossing; re-arms when the price
+    climbs back above the floor. A heads-up about a price you chose to watch, not
+    a recommendation; market prices are estimates.
+    """
+    try:
+        f = floor_alerts.run(dry_run=dry_run)
+        typer.echo(
+            f"floor-alerts: {f.checked} checked, {f.alerted} alerted, "
+            f"{f.rearmed} re-armed, {f.skipped} skipped (nothing held, or currency mismatch)"
+        )
     finally:
         close_pool()
 

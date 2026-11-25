@@ -119,6 +119,9 @@ export const SCHEMA_STATEMENTS: string[] = [
   `ALTER TABLE items ADD COLUMN IF NOT EXISTS sell_target_cents integer`,
   `ALTER TABLE items ADD COLUMN IF NOT EXISTS sell_target_currency varchar(3)`,
   `ALTER TABLE items ADD COLUMN IF NOT EXISTS sell_target_alerted_at timestamptz`,
+  `ALTER TABLE items ADD COLUMN IF NOT EXISTS floor_cents integer`,
+  `ALTER TABLE items ADD COLUMN IF NOT EXISTS floor_currency varchar(3)`,
+  `ALTER TABLE items ADD COLUMN IF NOT EXISTS floor_alerted_at timestamptz`,
 
   // ── YouTube-insights pipeline ───────────────────────────────────────
   // Enums first; ENUM types can't run CREATE TYPE IF NOT EXISTS pre-PG10

@@ -31,6 +31,8 @@ uv run poke-pipeline stage-alerts              # opt-in "usual low point" alerts
 uv run poke-pipeline stage-alerts --dry-run    # show what would be sent; send/write nothing
 uv run poke-pipeline sell-alerts               # webhook alert when an item you hold reaches the sell target set on its page (also run by watchlist-alerts; --no-sell skips it there)
 uv run poke-pipeline sell-alerts --dry-run     # show what would be sent; send/write nothing
+uv run poke-pipeline floor-alerts         # webhook alert when an item you hold falls to or below the price floor set on its page (also run by watchlist-alerts; --no-floor skips it there)
+uv run poke-pipeline floor-alerts --dry-run     # show what would be sent; send/write nothing
 uv run poke-pipeline weekly-digest          # post the weekly summary (value and price moves, the week's sales and spending, things worth a look) via ALERT_WEBHOOK_URL; read-only
 uv run poke-pipeline weekly-digest --dry-run # print the message; post nothing
 uv run poke-pipeline refresh-prices       # ask the web app (APP_URL + CRON_TOKEN) to refresh market prices for what you hold; run it daily, before the alerts

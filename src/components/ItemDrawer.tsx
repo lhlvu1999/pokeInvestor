@@ -238,6 +238,23 @@ function DrawerBody({
         </div>
       </div>
 
+      {data.set && (
+        <Link
+          href={`/catalog/sets/${data.set.groupId}`}
+          className="block rounded-md border border-sky-300/70 dark:border-sky-800/70 bg-sky-50/60 dark:bg-sky-950/20 px-3 py-2 hover:bg-sky-100/70 dark:hover:bg-sky-950/40"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="min-w-0 truncate text-sm font-medium">{data.set.name}</span>
+            <span className="shrink-0 text-xs text-sky-800 dark:text-sky-300">Set analytics →</span>
+          </div>
+          <div className="text-[11px] text-zinc-500">
+            {data.set.itemsHeld === 0
+              ? "You hold nothing from this set"
+              : `You hold ${data.set.itemsHeld} item${data.set.itemsHeld === 1 ? "" : "s"} · ${data.set.units} unit${data.set.units === 1 ? "" : "s"} · worth ${formatCompactAmount(data.set.value, data.set.currency)}`}
+          </div>
+        </Link>
+      )}
+
       <div>
         <div className="flex items-baseline justify-between gap-3">
           <div>

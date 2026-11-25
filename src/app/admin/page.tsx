@@ -8,6 +8,7 @@ import {
 } from "@/lib/server/admin";
 import { BulkStatusSection } from "./BulkStatusSection";
 import { AutoTagSection } from "./AutoTagSection";
+import { BulkFloorSection } from "./BulkFloorSection";
 import { WipeSection } from "./WipeSection";
 import { SyncSchemaSection } from "./SyncSchemaSection";
 
@@ -112,6 +113,11 @@ export default async function AdminPage() {
           <Card className="p-5">
             <h2 className="font-medium mb-3">Bulk auto-tag items</h2>
             <AutoTagSection initialPreview={loaded.autoTagPreview} />
+          </Card>
+
+          <Card className="p-5">
+            <h2 className="font-medium mb-3">Price floors from cost</h2>
+            <BulkFloorSection />
           </Card>
 
           <Card className="p-5 border-rose-300 dark:border-rose-900">

@@ -14,7 +14,7 @@ Each phase has its own schedule so a slow `insights` run doesn't delay
 | `cronworkflow-transcripts.yaml`         | every 15 min                                              |
 | `cronworkflow-insights.yaml`            | every 30 min                                              |
 | `cronworkflow-refresh-prices.yaml`      | daily 01:00 UTC — asks the web app to refresh market prices for what you hold (before the alerts) |
-| `cronworkflow-watchlist-alerts.yaml`    | daily 02:00 UTC — buy-target, sell-target and opt-in "usual low point" alerts via webhook |
+| `cronworkflow-watchlist-alerts.yaml`    | daily 02:00 UTC — buy-target, sell-target, price-floor and opt-in "usual low point" alerts via webhook |
 | `cronworkflow-weekly-digest.yaml`       | Mondays 02:00 UTC — one weekly summary message via webhook (read-only) |
 | `cronworkflow-catalog-sync.yaml`        | daily 21:00 UTC — Pokémon sets, sealed prices, set totals; links held items |
 | `secret.example.yaml`                   | Template — never commit a populated copy                  |

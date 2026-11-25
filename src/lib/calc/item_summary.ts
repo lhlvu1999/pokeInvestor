@@ -130,7 +130,7 @@ export function summarizeItem(i: ItemSummaryInput): SummaryLine[] {
   if (i.weekChangePct != null && Math.abs(i.weekChangePct) >= MIN_MOVE) {
     out.push({
       group: 1,
-      text: `Over the past week the price ${i.weekChangePct > 0 ? "rose" : "fell"} ${pct(i.weekChangePct)} (these are eBay asking prices, so small moves are noise).`,
+      text: `Over the past week the price ${i.weekChangePct > 0 ? "rose" : "fell"} ${pct(i.weekChangePct)} (prices are estimates, so small moves are noise).`,
     });
   }
 

@@ -9,8 +9,8 @@ One message a week, so you see how the week went without opening the app:
   is the part that is the market's doing.
 - **The week**: sales (money in, cost, profit), what you spent, and the year's
   profit so far.
-- **Worth a look**: sell targets reached, orders that are overdue, entries that
-  look like slips, and no recent backup.
+- **Worth a look**: sell targets and price floors reached, orders that are
+  overdue, entries that look like slips, and no recent backup.
 
 Rules, chosen to be quiet and honest:
 
@@ -125,6 +125,7 @@ class ItemData:
     prices: list[Price] = field(default_factory=list)
     """Oldest first."""
     sell_target: tuple[int, str] | None = None
+    floor: tuple[int, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -178,6 +179,7 @@ class Digest:
     buys: int = 0
     ytd_net: int = 0
     sell_targets: list[str] = field(default_factory=list)
+    floors: list[str] = field(default_factory=list)
     overdue_units: int = 0
     overdue_orders: int = 0
     overdue_oldest_days: int = 0
@@ -276,6 +278,14 @@ def compute(inp: Inputs) -> Digest:
             and p_now.cents >= it.sell_target[0]
         ):
             d.sell_targets.append(it.name)
+        if (
+            it.floor
+            and r_now.held_qty > 0
+            and p_now
+            and p_now.currency == it.floor[1]
+            and p_now.cents <= it.floor[0]
+        ):
+            d.floors.append(it.name)
 
     d.gainers = sorted((m for m in movers if m.effect > 0), key=lambda m: -m.effect)[:TOP_MOVERS]
     d.losers = sorted((m for m in movers if m.effect < 0), key=lambda m: m.effect)[:TOP_MOVERS]
@@ -315,6 +325,10 @@ def _attention(d: Digest) -> list[str]:
     if n:
         noun = "item has" if n == 1 else "items have"
         lines.append(f"• {n} {noun} reached your sell target: {_names(d.sell_targets)}")
+    n = len(d.floors)
+    if n:
+        noun = "item has" if n == 1 else "items have"
+        lines.append(f"• {n} {noun} fallen to your price floor: {_names(d.floors)}")
     if d.overdue_units:
         lines.append(
             f"• {d.overdue_units} unit{'s' if d.overdue_units != 1 else ''} on the way for "
@@ -432,7 +446,8 @@ def fetch_inputs(conn: Connection[Any], now: datetime) -> Inputs:
         cur.execute("SELECT quote, rate FROM fx_rates WHERE base = 'USD'")
         usd_to = {r["quote"]: float(r["rate"]) for r in cur.fetchall()}
         cur.execute(
-            "SELECT id::text AS id, name, sell_target_cents, sell_target_currency FROM items ORDER BY name"
+            "SELECT id::text AS id, name, sell_target_cents, sell_target_currency, "
+            "floor_cents, floor_currency FROM items ORDER BY name"
         )
         item_rows = cur.fetchall()
         cur.execute(
@@ -485,6 +500,11 @@ def fetch_inputs(conn: Connection[Any], now: datetime) -> Inputs:
             sell_target=(
                 (int(r["sell_target_cents"]), r["sell_target_currency"])
                 if r["sell_target_cents"] is not None and r["sell_target_currency"]
+                else None
+            ),
+            floor=(
+                (int(r["floor_cents"]), r["floor_currency"])
+                if r["floor_cents"] is not None and r["floor_currency"]
                 else None
             ),
         )

@@ -20,6 +20,11 @@ import {
 } from "@/lib/calc/holdings";
 import { itemMatchKey } from "@/lib/import";
 import { getCostMethod } from "./settings";
+import {
+  attachCatalogProduct,
+  findConfidentSealed,
+  type LinkSummary,
+} from "./catalog_attach";
 
 const itemSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(200),
@@ -29,6 +34,13 @@ const itemSchema = z.object({
   sourceUrl: z.string().trim().url().optional().or(z.literal("")),
   pricechartingId: z.string().trim().max(50).optional().or(z.literal("")),
   note: z.string().trim().max(2000).optional().or(z.literal("")),
+  /** A catalogue product or card the person picked: the item is linked to it. */
+  catalogProductId: z.number().int().positive().optional(),
+  /**
+   * With no product picked, link the item when its name is clearly one sealed
+   * product (the same rule as the daily sync). Off for a person who unlinked it.
+   */
+  autoLink: z.boolean().optional(),
 });
 
 function toNullable(v: string | undefined): string | null {
@@ -42,7 +54,7 @@ export type ActionResult<T> =
 
 export async function createItem(
   input: CreateItemInput,
-): Promise<ActionResult<Item>> {
+): Promise<ActionResult<Item & { link: LinkSummary | null }>> {
   const parsed = itemSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid" };
@@ -61,9 +73,25 @@ export async function createItem(
     })
     .returning();
 
+  // Link to the catalogue now, so the item counts in its set's analytics straight
+  // away. A failure here never loses the item: it is just left unlinked.
+  let link: LinkSummary | null = null;
+  try {
+    if (parsed.data.catalogProductId != null) {
+      link = await attachCatalogProduct(created.id, parsed.data.catalogProductId, "picked");
+    } else if (parsed.data.autoLink) {
+      const productId = await findConfidentSealed(created.name, created.tags);
+      if (productId != null) link = await attachCatalogProduct(created.id, productId, "auto");
+    }
+  } catch (err) {
+    console.error("createItem: catalogue link failed", err);
+  }
+
   revalidatePath("/items");
+  revalidatePath("/catalog", "layout");
+  revalidatePath("/analytics", "layout");
   revalidatePath("/");
-  return { ok: true, data: created };
+  return { ok: true, data: { ...created, link } };
 }
 
 export async function deleteItem(id: string): Promise<ActionResult<Item>> {

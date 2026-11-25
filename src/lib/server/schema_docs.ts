@@ -30,7 +30,9 @@ items
   catalog_link_skipped bool (true = deliberately not in the catalogue),
   catalog_link_source text null ('auto' = linked by the daily sync, 'manual', 'declined'),
   sell_target_cents integer null, sell_target_currency varchar(3) null,  -- tell me when the market price reaches this (minor units); null = no target
-  sell_target_alerted_at timestamptz null  -- set when the daily check alerted that it was reached; cleared if the price falls back below
+  sell_target_alerted_at timestamptz null,  -- set when the daily check alerted that it was reached; cleared if the price falls back below
+  floor_cents integer null, floor_currency varchar(3) null,  -- tell me when the market price falls to or below this (minor units); null = no floor
+  floor_alerted_at timestamptz null,  -- set when the daily check alerted that it was reached; cleared if the price climbs back above
   raw_card_product_id bigint null → catalog_products (for a graded slab: the catalogue CARD it is, matched by card number; its raw price is kept daily in catalog_prices),
   raw_card_skipped bool (true = the person said the matched card is wrong)
 

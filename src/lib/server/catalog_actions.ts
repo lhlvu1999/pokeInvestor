@@ -8,6 +8,7 @@ import { z } from "zod";
 import { db } from "@/db/client";
 import { catalogProducts, items } from "@/db/schema";
 import type { ActionResult } from "./items";
+import { applyCatalogPrices } from "./tcg_prices";
 
 const schema = z.object({
   links: z
@@ -135,6 +136,16 @@ export async function saveCatalogLinks(
       }
     }
   });
+
+  // Newly linked items take TCGplayer's market price right away.
+  const linkedIds = links.filter((l) => l.productId != null).map((l) => l.itemId);
+  if (linkedIds.length > 0) {
+    try {
+      await applyCatalogPrices(linkedIds);
+    } catch (err) {
+      console.error("saveCatalogLinks: catalogue price failed", err);
+    }
+  }
 
   revalidatePath("/catalog/links");
   revalidatePath("/items");
