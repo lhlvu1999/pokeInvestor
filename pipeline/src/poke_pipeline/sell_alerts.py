@@ -36,6 +36,7 @@ from typing import Any
 import httpx
 from psycopg import Connection
 
+from poke_pipeline import webhook_batches as wb
 from poke_pipeline.config import load_settings
 from poke_pipeline.db import connection
 from poke_pipeline.watchlist_alerts import format_money
@@ -101,7 +102,7 @@ def _line(c: Candidate) -> str:
     else:
         above = (c.price_minor - c.target_minor) / c.target_minor * 100
         gap = f"{above:.1f}% above your target"
-    return f"• *{c.name}* — now {now} ({gap} of {target}) · you hold {c.held}"
+    return f"• *{wb.trim_name(c.name)}* — now {now} ({gap} of {target}) · you hold {c.held}"
 
 
 def build_message(alerts: tuple[Candidate, ...]) -> str:
@@ -210,11 +211,11 @@ def run(*, dry_run: bool = False, webhook_url: str | None = None) -> Result:
                 "nothing held" if c.held <= 0 else f"target in {c.currency} but price in {c.price_currency}",
             )
 
-        message = build_message(decision.to_alert) if decision.to_alert else None
+        groups = wb.split_alerts(decision.to_alert, build_message)
 
         if dry_run:
             log.info("sell-alerts: dry run — nothing sent or written")
-            print(message if message else "(no new sell alerts)")
+            print("\n\n".join(build_message(g) for g in groups) if groups else "(no new sell alerts)")
             if decision.to_rearm:
                 print(f"(would re-arm {len(decision.to_rearm)} item(s))")
             return Result(
@@ -228,22 +229,29 @@ def run(*, dry_run: bool = False, webhook_url: str | None = None) -> Result:
         # Re-arming is plain bookkeeping and needs no webhook.
         _set_alerted(conn, [c.id for c in decision.to_rearm], False)
 
-        posted = False
-        if message:
-            if not url:
-                log.warning(
-                    "sell-alerts: %d item(s) reached target but ALERT_WEBHOOK_URL "
-                    "is not set — will retry next run",
-                    len(decision.to_alert),
-                )
-            elif _post(url, message):
-                posted = True
-                _set_alerted(conn, [c.id for c in decision.to_alert], True)
-                log.info("sell-alerts: alerted on %d item(s)", len(decision.to_alert))
+        delivered = 0
+        if groups and not url:
+            log.warning(
+                "sell-alerts: %d item(s) reached target but ALERT_WEBHOOK_URL "
+                "is not set — will retry next run",
+                len(decision.to_alert),
+            )
+        elif groups:
+            # One message per group; only delivered groups are marked, and the first
+            # failure stops the run so the rest are retried next time.
+            delivered = wb.deliver(
+                groups,
+                build_message,
+                lambda text: _post(url, text),
+                lambda g: _set_alerted(conn, [c.id for c in g], True),
+            )
+            if delivered:
+                log.info("sell-alerts: alerted on %d item(s)", delivered)
+        posted = delivered > 0
 
         return Result(
             checked=checked,
-            alerted=len(decision.to_alert) if posted else 0,
+            alerted=delivered,
             rearmed=len(decision.to_rearm),
             skipped=len(decision.skipped),
             posted=posted,

@@ -12,6 +12,8 @@ import { Money } from "@/components/Money";
 import { TagBadge } from "@/components/TagBadge";
 import type { ItemWithValuation } from "@/lib/server/items";
 import type { ConvertedItemValues } from "@/lib/calc/portfolio";
+import { floorStanding } from "@/lib/calc/price_floor";
+import { sellTargetStanding } from "@/lib/calc/sell_target";
 
 type SortKey =
   | "recent"
@@ -85,7 +87,7 @@ const STATUS_ORDER: Record<Status, number> = {
   empty: 3,
 };
 
-type StatusFilter = "all" | Status;
+type StatusFilter = "all" | Status | "alerts";
 
 function parseStatusFilter(raw: string | null): StatusFilter {
   switch (raw) {
@@ -93,6 +95,7 @@ function parseStatusFilter(raw: string | null): StatusFilter {
     case "on-the-way":
     case "sold-out":
     case "empty":
+    case "alerts":
       return raw;
     default:
       return "all";
@@ -270,7 +273,10 @@ export function ItemsTable({
         if (term && !withVal.item.name.toLowerCase().includes(term)) {
           return false;
         }
-        if (statusFilter !== "all") {
+        if (statusFilter === "alerts") {
+          const a = alertsOf(withVal.item, withVal.valuation, withVal.latestPrice);
+          if (!a.atTarget && !a.atFloor) return false;
+        } else if (statusFilter !== "all") {
           const has = statusesOf(withVal.valuation);
           if (!has.includes(statusFilter)) return false;
         }
@@ -328,6 +334,7 @@ export function ItemsTable({
           <option value="on-the-way">On the way only</option>
           <option value="sold-out">Sold out only</option>
           <option value="empty">No transactions</option>
+          <option value="alerts">At target or floor</option>
         </Select>
         <div className="text-xs text-zinc-500 ml-auto">
           {shownCount === totalCount
@@ -556,7 +563,12 @@ export function ItemsTable({
                           className="font-medium hover:underline"
                         >
                           {item.name}
-                        </ItemLink>
+                        </ItemLink>{" "}
+                        <AlertFlags
+                          item={item}
+                          valuation={valuation}
+                          latestPrice={latestPrice}
+                        />
                         {(item.setCode || item.cardNumber) && (
                           <div className="text-xs text-zinc-500">
                             {[item.setCode, item.cardNumber]
@@ -701,6 +713,69 @@ const MOBILE_SORTS: [SortKey, string][] = [
   ["status", "Status"],
 ];
 
+/**
+ * Small flags for a held item whose market price has reached the sell target
+ * or fallen to the price floor you set. Descriptive only.
+ */
+function alertsOf(
+  item: ItemWithValuation["item"],
+  valuation: ItemWithValuation["valuation"],
+  latestPrice: ItemWithValuation["latestPrice"],
+): { atTarget: boolean; atFloor: boolean } {
+  if (valuation.quantity <= 0) return { atTarget: false, atFloor: false };
+  const price = {
+    priceCents: latestPrice?.priceCents ?? null,
+    priceCurrency: latestPrice?.currency ?? null,
+  };
+  return {
+    atTarget:
+      sellTargetStanding({
+        targetCents: item.sellTargetCents,
+        targetCurrency: item.sellTargetCurrency,
+        ...price,
+      }).state === "reached",
+    atFloor:
+      floorStanding({
+        floorCents: item.floorCents,
+        floorCurrency: item.floorCurrency,
+        ...price,
+      }).state === "reached",
+  };
+}
+
+function AlertFlags({
+  item,
+  valuation,
+  latestPrice,
+}: {
+  item: ItemWithValuation["item"];
+  valuation: ItemWithValuation["valuation"];
+  latestPrice: ItemWithValuation["latestPrice"];
+}) {
+  const { atTarget, atFloor } = alertsOf(item, valuation, latestPrice);
+  if (!atTarget && !atFloor) return null;
+  return (
+    <span className="inline-flex flex-wrap gap-1 align-middle">
+      {atTarget && (
+        <span
+          title="The market price has reached the sell target you set"
+          className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+        >
+          At target
+        </span>
+      )}
+      {atFloor && (
+        <span
+          title="The market price has fallen to the price floor you set"
+          className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+        >
+          At floor
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** One item as a phone-sized card: the numbers that matter, no sideways scroll. */
 function ItemCard({
   item,
@@ -731,6 +806,7 @@ function ItemCard({
         </ItemLink>
         {sub && <div className="text-xs text-zinc-500">{sub}</div>}
         <div className="flex flex-wrap gap-1 mt-1.5">
+          <AlertFlags item={item} valuation={valuation} latestPrice={latestPrice} />
           {statusesOf(valuation).map((s) => (
             <StatusBadge key={s} status={s} />
           ))}

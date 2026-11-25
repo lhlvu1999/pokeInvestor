@@ -2,8 +2,9 @@ export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import { Card } from "@/components/ui";
-import { getTagPlan } from "@/lib/server/set_tags";
+import { getTagContext, getTagPlan } from "@/lib/server/set_tags";
 import { MergeForm } from "./MergeForm";
+import { TagCleanup } from "./TagCleanup";
 
 /**
  * Your own tags for sets ("mega2.5", "pris") and the catalogue's set for the same
@@ -11,7 +12,7 @@ import { MergeForm } from "./MergeForm";
  * renamed to the set's real name.
  */
 export default async function TagsPage() {
-  const plan = await getTagPlan();
+  const [plan, ctx] = await Promise.all([getTagPlan(), getTagContext()]);
   return (
     <div className="flex flex-col gap-5 max-w-3xl">
       <div>
@@ -34,17 +35,12 @@ export default async function TagsPage() {
 
       {plan.kept.length > 0 && (
         <Card className="p-4">
-          <h2 className="font-medium text-sm">Kept as they are</h2>
-          <p className="text-[11px] text-zinc-500 mt-1">
-            These span several sets, or none of their items is linked to the catalogue yet.
+          <h2 className="font-medium text-sm">Other tags</h2>
+          <p className="text-[11px] text-zinc-500 mt-1 mb-2 leading-relaxed">
+            These span several sets, or none of their items is linked to the catalogue yet. Rename one
+            (name a set to merge it into that set&apos;s tag) or remove it from every item.
           </p>
-          <p className="mt-2 text-sm flex flex-wrap gap-x-4 gap-y-1">
-            {plan.kept.map((k) => (
-              <span key={k.tag}>
-                {k.tag} <span className="text-zinc-500">{k.count}</span>
-              </span>
-            ))}
-          </p>
+          <TagCleanup rows={plan.kept} suggestions={ctx.setTags} />
         </Card>
       )}
     </div>

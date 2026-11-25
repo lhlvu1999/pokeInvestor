@@ -14,14 +14,21 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createItem } from "@/lib/server/items";
 import { useToast } from "@/components/Toast";
 import { formatAmount } from "@/lib/currency";
+import type { CatalogHit } from "@/lib/server/catalog_search";
+import { useCatalogueSearch } from "@/components/useCatalogueSearch";
+import { CatalogueHitLabel } from "@/components/CatalogueHitLabel";
+import { ItemThumb } from "@/components/ItemThumb";
 
 export type PickerOption = {
   id: string;
   name: string;
+  imageUrl?: string | null;
   currency: string; // from most-recent tx; used to warn on mismatch
   held: number;
   /** Latest market price per unit in `currency`, if known. */
   marketMinor?: number | null;
+  /** The catalogue set this item is linked to, if any. */
+  setName?: string | null;
 };
 
 type Props = {
@@ -101,6 +108,9 @@ export function ItemPicker({
     trimmed.length > 0 &&
     items.some((it) => it.name.toLowerCase() === trimmed.toLowerCase());
   const showCreate = trimmed.length >= 2 && !exactExists;
+  // Catalogue products the typed name could be: creating from one links the new
+  // item to its set straight away.
+  const catHits = useCatalogueSearch(trimmed, showCreate && !locked && open).slice(0, 4);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -120,22 +130,42 @@ export function ItemPicker({
   function createNew() {
     if (!trimmed) return;
     startCreate(async () => {
-      const res = await createItem({ name: trimmed });
-      if (!res.ok) {
-        toast.show({ kind: "error", message: res.error });
-        return;
-      }
-      toast.show({
-        kind: "success",
-        message: `Created "${res.data.name}"`,
-      });
-      onChange(res.data.id);
-      setOpen(false);
+      // A clear catalogue match is linked automatically; otherwise it stays unlinked.
+      const res = await createItem({ name: trimmed, autoLink: true });
+      finishCreate(res);
     });
   }
 
+  function createFromCatalogue(hit: CatalogHit) {
+    startCreate(async () => {
+      const res = await createItem({
+        name: hit.name,
+        catalogProductId: hit.productId,
+        setCode: hit.setAbbreviation ?? "",
+        cardNumber: hit.cardNumber ?? "",
+      });
+      finishCreate(res);
+    });
+  }
+
+  function finishCreate(res: Awaited<ReturnType<typeof createItem>>) {
+    if (!res.ok) {
+      toast.show({ kind: "error", message: res.error });
+      return;
+    }
+    const link = res.data.link;
+    toast.show({
+      kind: "success",
+      message: link
+        ? `Created "${res.data.name}" and linked it to ${link.productName} (${link.setName}).`
+        : `Created "${res.data.name}". It isn't linked to the catalogue yet.`,
+    });
+    onChange(res.data.id);
+    setOpen(false);
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    const total = hits.length + (showCreate ? 1 : 0);
+    const total = hits.length + (showCreate ? 1 : 0) + catHits.length;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setActive((i) => Math.min(total - 1, i + 1));
@@ -146,8 +176,10 @@ export function ItemPicker({
       e.preventDefault();
       if (active < hits.length) {
         pick(hits[active].id);
-      } else if (showCreate) {
+      } else if (showCreate && active === hits.length) {
         createNew();
+      } else if (catHits[active - hits.length - 1]) {
+        createFromCatalogue(catHits[active - hits.length - 1]);
       }
     } else if (e.key === "Escape") {
       setOpen(false);
@@ -158,7 +190,8 @@ export function ItemPicker({
     return (
       <>
         <input type="hidden" name="itemId" value={selected.id} />
-        <div className="h-10 flex items-center px-3 rounded border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900 text-sm text-zinc-500">
+        <div className="h-12 flex items-center gap-3 px-3 rounded border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-900 text-sm text-zinc-500">
+          <ItemThumb imageUrl={selected.imageUrl ?? null} name={selected.name} size={32} />
           {selected.name}
         </div>
       </>
@@ -187,8 +220,12 @@ export function ItemPicker({
         className="h-10 w-full px-3 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700"
       />
       {selected && (
-        <div className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1">
-          ✓ {selected.name} — {selected.held} held ({selected.currency})
+        <div className="flex items-center gap-2 mt-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
+          <ItemThumb imageUrl={selected.imageUrl ?? null} name={selected.name} size={36} />
+          <span>
+            ✓ {selected.name} — {selected.held} held ({selected.currency})
+            {selected.setName ? ` · ${selected.setName}` : ""}
+          </span>
         </div>
       )}
 
@@ -206,14 +243,20 @@ export function ItemPicker({
                   type="button"
                   onClick={() => pick(it.id)}
                   onMouseEnter={() => setActive(i)}
-                  className={`w-full text-left px-3 py-2.5 sm:py-2 flex flex-col items-start sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 text-sm ${
+                  className={`w-full text-left px-3 py-2 flex items-center gap-3 text-sm ${
                     i === active
                       ? "bg-zinc-100 dark:bg-zinc-800"
                       : "hover:bg-zinc-50 dark:hover:bg-zinc-900"
                   }`}
                 >
-                  <span className="sm:truncate max-w-full">{it.name}</span>
-                  <span className="text-[11px] text-zinc-500 whitespace-nowrap">
+                  <ItemThumb imageUrl={it.imageUrl ?? null} name={it.name} size={40} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{it.name}</span>
+                    {it.setName && (
+                      <span className="block text-[11px] text-zinc-500 truncate">{it.setName}</span>
+                    )}
+                  </span>
+                  <span className="text-[11px] text-zinc-500 whitespace-nowrap text-right">
                     {it.held} held
                     {it.marketMinor != null && it.marketMinor > 0
                       ? ` · ${formatAmount(it.marketMinor, it.currency)}`
@@ -244,6 +287,30 @@ export function ItemPicker({
                 </button>
               </li>
             )}
+            {showCreate &&
+              catHits.map((h, k) => (
+                <li key={h.productId}>
+                  <button
+                    type="button"
+                    onClick={() => createFromCatalogue(h)}
+                    onMouseEnter={() => setActive(hits.length + 1 + k)}
+                    disabled={creating}
+                    className={`w-full text-left px-3 py-2 flex items-center gap-2 text-sm ${
+                      active === hits.length + 1 + k
+                        ? "bg-emerald-100 dark:bg-emerald-950/40"
+                        : "hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                    }`}
+                  >
+                    <span className="text-emerald-600 dark:text-emerald-400">+</span>
+                    <span className="min-w-0">
+                      <span className="block text-[11px] text-zinc-500">
+                        Create from the catalogue and link to its set
+                      </span>
+                      <CatalogueHitLabel hit={h} />
+                    </span>
+                  </button>
+                </li>
+              ))}
           </ul>
         </div>
       )}

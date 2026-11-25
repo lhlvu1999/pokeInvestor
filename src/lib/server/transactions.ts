@@ -24,6 +24,7 @@ import { storedExitReason } from "@/lib/calc/exit_reason";
 import { checkDateMoves } from "@/lib/calc/bulk_date";
 import { daysLeft, purgeBefore } from "@/lib/calc/recently_deleted";
 import type { ActionResult } from "./items";
+import { applyCatalogPrices } from "./tcg_prices";
 
 const transactionInputSchema = z.object({
   itemId: z.string().uuid(),
@@ -147,6 +148,14 @@ export async function createTransaction(
       exitReason: storedExitReason(parsed.data.type, parsed.data.exitReason),
     })
     .returning();
+
+  // A catalogue-linked item with no price yet gets TCGplayer's market price now,
+  // so it is valued from its first purchase. Never fails the transaction.
+  try {
+    await applyCatalogPrices([parsed.data.itemId], { onlyIfUnpriced: true });
+  } catch (err) {
+    console.error("createTransaction: catalogue price failed", err);
+  }
 
   revalidatePath("/");
   revalidatePath("/items");
@@ -385,7 +394,7 @@ export async function createTransactionsBulk(
       if (cached) {
         itemId = cached;
       } else {
-        const created = await createItem({ name: row.itemName });
+        const created = await createItem({ name: row.itemName, autoLink: true });
         if (!created.ok) {
           result.errors.push({ row: i + 1, message: created.error });
           continue;

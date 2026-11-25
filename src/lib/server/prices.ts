@@ -24,6 +24,7 @@ import {
 } from "@/lib/calc/price_estimate";
 import { getRate } from "@/lib/fx";
 import { getPriceChartingToken } from "./settings";
+import { applyCatalogPrices, tcgCoveredIds } from "./tcg_prices";
 import type { ActionResult } from "./items";
 
 const priceInputSchema = z.object({
@@ -359,6 +360,8 @@ export type BulkPriceOutcome = {
   itemId: string;
   itemName: string;
   status: "saved" | "skipped" | "no_data" | "error" | "cooldown";
+  /** Where a saved price came from. TCGplayer is used for catalogue-linked items. */
+  source?: "tcgplayer" | "ebay";
   priceCents?: number;
   currency?: string;
   confidence?: EstimateConfidence;
@@ -386,10 +389,15 @@ export type PriceRefreshTarget = { id: string; name: string };
 const PRICE_REFRESH_COOLDOWN_MS = 60 * 60 * 1000;
 
 export type RefreshTargets = {
-  /** Eligible for a bulk run right now. */
+  /** Needs an eBay call and is eligible for a bulk run right now. */
   eligible: PriceRefreshTarget[];
-  /** Held, but priced within the cooldown window. */
+  /** Needs eBay, but was priced within the cooldown window. */
   onCooldown: PriceRefreshTarget[];
+  /**
+   * Held items the catalogue can price (TCGplayer's market price follows recent
+   * sales, so it is used instead of eBay asking prices). No eBay call, no cooldown.
+   */
+  tcg: PriceRefreshTarget[];
 };
 
 /** Latest market-price timestamp per item. */
@@ -433,15 +441,21 @@ export async function listPriceRefreshTargets(
   }
 
   const lastAt = await latestPricedAtByItem();
+  const covered = await tcgCoveredIds(candidates.map((c) => c.id));
   const cutoff = Date.now() - PRICE_REFRESH_COOLDOWN_MS;
   const eligible: PriceRefreshTarget[] = [];
   const onCooldown: PriceRefreshTarget[] = [];
+  const tcg: PriceRefreshTarget[] = [];
   for (const c of candidates) {
+    if (covered.has(c.id)) {
+      tcg.push(c);
+      continue;
+    }
     const at = lastAt.get(c.id);
     if (at && at.getTime() > cutoff) onCooldown.push(c);
     else eligible.push(c);
   }
-  return { eligible, onCooldown };
+  return { eligible, onCooldown, tcg };
 }
 
 /**
@@ -483,9 +497,36 @@ export async function refreshPricesForItems(
     : await latestPricedAtByItem();
   const cutoff = Date.now() - PRICE_REFRESH_COOLDOWN_MS;
 
+  // Items the catalogue can price take TCGplayer's market price (what the product
+  // recently sold for) and never reach eBay (what sellers are asking).
+  const tcgOutcomes = await applyCatalogPrices(itemIds);
+
   const outcomes = await Promise.all(
     itemIds.map(async (itemId): Promise<BulkPriceOutcome> => {
       const itemName = nameById.get(itemId) ?? "(unknown)";
+      const fromCatalogue = tcgOutcomes.get(itemId);
+      if (fromCatalogue) {
+        if (fromCatalogue.status === "saved") {
+          return {
+            itemId,
+            itemName,
+            status: "saved",
+            source: "tcgplayer",
+            priceCents: fromCatalogue.priceCents,
+            currency: fromCatalogue.currency,
+          };
+        }
+        if (fromCatalogue.status === "uptodate") {
+          return {
+            itemId,
+            itemName,
+            status: "cooldown",
+            source: "tcgplayer",
+            message: "TCGplayer price is already up to date",
+          };
+        }
+        return { itemId, itemName, status: "error", source: "tcgplayer", message: fromCatalogue.message };
+      }
       const priced = lastAt.get(itemId);
       if (priced && priced.getTime() > cutoff) {
         const mins = Math.round(
@@ -516,6 +557,7 @@ export async function refreshPricesForItems(
           itemId,
           itemName,
           status: d.skipped ? "skipped" : "saved",
+          source: "ebay",
           priceCents: d.priceCents,
           currency: d.currency,
           confidence: d.confidence,

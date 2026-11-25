@@ -23,7 +23,7 @@ import {
 } from "@/lib/currency";
 import { ItemPicker, type PickerOption } from "./ItemPicker";
 
-type Option = { id: string; name: string };
+type Option = { id: string; name: string; imageUrl: string | null };
 
 function nowLocalIso() {
   const d = new Date();
@@ -37,6 +37,7 @@ export function NewTransactionForm({
   itemHeld,
   itemMarket,
   itemLastBuy,
+  itemSet,
   defaultItemId,
   defaultType,
   defaultExit,
@@ -49,6 +50,8 @@ export function NewTransactionForm({
   itemMarket: Record<string, { priceMinor: number; currency: string }>;
   /** Per-unit item cost of the most recent buy (excl. shipping), by item id. */
   itemLastBuy: Record<string, number>;
+  /** The catalogue set each linked item belongs to, by item id. */
+  itemSet: Record<string, string>;
   defaultItemId: string | null;
   defaultType: "buy" | "sell";
   /** Pre-selected exit reason, from a "Gift / lost / opened" link. */
@@ -207,9 +210,11 @@ export function NewTransactionForm({
           const pickerOptions: PickerOption[] = items.map((it) => ({
             id: it.id,
             name: it.name,
+            imageUrl: it.imageUrl,
             currency: itemCurrency[it.id] ?? defaultCurrency,
             held: itemHeld[it.id] ?? 0,
             marketMinor: itemMarket[it.id]?.priceMinor ?? null,
+            setName: itemSet[it.id] ?? null,
           }));
           return (
             <ItemPicker

@@ -105,6 +105,18 @@ export const items = pgTable(
       withTimezone: true,
     }),
     /**
+     * Price floor: "tell me when the market price falls to or below this" (minor
+     * units of `floorCurrency`). The mirror of the sell target; null = none.
+     */
+    floorCents: integer("floor_cents"),
+    floorCurrency: varchar("floor_currency", { length: 3 }),
+    /**
+     * Set when the pipeline alerted that the price fell to the floor. Cleared when
+     * the price climbs back above it (so the next fall alerts again) and whenever
+     * the floor is changed.
+     */
+    floorAlertedAt: timestamp("floor_alerted_at", { withTimezone: true }),
+    /**
      * Free-form lowercase tags for grouping items (e.g. "etb", "slab",
      * "booster box"). Stored as a Postgres text array. Indexed for fast
      * `tags @> ARRAY['x']` filtering.

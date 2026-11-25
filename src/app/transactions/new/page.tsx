@@ -5,6 +5,7 @@ import { db } from "@/db/client";
 import { items, marketPrices, transactions } from "@/db/schema";
 import { ButtonLink, Card, EmptyState } from "@/components/ui";
 import { NewTransactionForm } from "./NewTransactionForm";
+import { loadItemSetNames } from "@/lib/server/catalog_item_sets";
 import { DEFAULT_TRANSACTION_CURRENCY } from "@/lib/currency";
 import { computeHoldings } from "@/lib/calc/holdings";
 import { lastBuyPerUnit } from "@/lib/calc/entry_hints";
@@ -21,7 +22,7 @@ export default async function NewTransactionPage({
   const defaultType: "buy" | "sell" =
     sp.type === "sell" || defaultExit !== "sold" ? "sell" : "buy";
   const allItems = await db
-    .select({ id: items.id, name: items.name })
+    .select({ id: items.id, name: items.name, imageUrl: items.imageUrl })
     .from(items)
     .orderBy(asc(items.name));
 
@@ -65,6 +66,8 @@ export default async function NewTransactionPage({
     itemMarket[p.itemId] = { priceMinor: p.priceCents, currency: p.currency };
   }
 
+  const itemSet = await loadItemSetNames();
+
   return (
     <div className="flex flex-col gap-6 max-w-xl">
       <h1 className="text-2xl font-semibold">New transaction</h1>
@@ -91,6 +94,7 @@ export default async function NewTransactionPage({
             itemHeld={itemHeld}
             itemMarket={itemMarket}
             itemLastBuy={itemLastBuy}
+            itemSet={itemSet}
             defaultItemId={sp.itemId ?? null}
             defaultType={defaultType}
             defaultExit={defaultExit}

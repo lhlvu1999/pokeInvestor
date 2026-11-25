@@ -20,20 +20,31 @@ export async function runScheduledRefresh(): Promise<ScheduledResult> {
   if (running) return { ok: false, status: 409, error: "A refresh is already running." };
   running = true;
   try {
+    const { eligible, onCooldown, tcg } = await listPriceRefreshTargets(true);
+
+    // Items the catalogue can price use TCGplayer's market price and need no eBay
+    // call, so they are done first and do not depend on eBay being reachable.
     // Fail fast and clearly if eBay cannot be reached with the keys we have,
     // instead of reporting a hundred identical per-item errors.
-    try {
-      await getAppToken();
-    } catch (err) {
-      const why = err instanceof EbayError ? err.message : "Could not reach eBay.";
-      return { ok: false, status: 503, error: why };
+    let ebayWhy: string | null = null;
+    if (eligible.length > 0) {
+      try {
+        await getAppToken();
+      } catch (err) {
+        ebayWhy = err instanceof EbayError ? err.message : "Could not reach eBay.";
+      }
     }
-    const { eligible, onCooldown } = await listPriceRefreshTargets(true);
-    const done = await runRefresh(eligible, (ids) => refreshPricesForItems(ids), {
+    if (ebayWhy && tcg.length === 0) return { ok: false, status: 503, error: ebayWhy };
+
+    const queue = ebayWhy ? tcg : [...tcg, ...eligible];
+    const done = await runRefresh(queue, (ids) => refreshPricesForItems(ids), {
       ...DEFAULTS,
       now: Date.now,
     });
-    return { ok: true, summary: withCooledDown(done, onCooldown.length) };
+    // The catalogue prices were still applied; the run is reported as failed so a
+    // scheduler shows that the eBay part did not happen.
+    const summary = ebayWhy ? { ...done, stopped: "error" as const, firstError: ebayWhy } : done;
+    return { ok: true, summary: withCooledDown(summary, onCooldown.length) };
   } finally {
     running = false;
   }

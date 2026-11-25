@@ -35,8 +35,11 @@ type Status = "idle" | "running" | "stopping" | "done";
 export function BulkPriceRefresh({
   targets,
   onCooldown = [],
+  tcg = [],
 }: {
   targets: PriceRefreshTarget[];
+  /** Held items the catalogue can price: TCGplayer's market price, no eBay call. */
+  tcg?: PriceRefreshTarget[];
   /** Held items skipped because they were priced within the last hour.
    * Only sent to the server when the user ticks the override. */
   onCooldown?: PriceRefreshTarget[];
@@ -53,7 +56,9 @@ export function BulkPriceRefresh({
 
   // With the override on we also re-price the cooling-down items, so the
   // run covers everything held.
-  const queue = ignoreCooldown ? [...targets, ...onCooldown] : targets;
+  const ebayQueue = ignoreCooldown ? [...targets, ...onCooldown] : targets;
+  // TCGplayer-priced items go first: they are free and quick.
+  const queue = [...tcg, ...ebayQueue];
   const total = queue.length;
 
   async function run() {
@@ -120,7 +125,7 @@ export function BulkPriceRefresh({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-lg font-semibold">Update all prices from eBay</h2>
+          <h2 className="text-lg font-semibold">Update all prices</h2>
           {status !== "running" && (
             <button
               type="button"
@@ -133,9 +138,17 @@ export function BulkPriceRefresh({
         </div>
 
         <div className="text-xs text-zinc-600 dark:text-zinc-400">
-          {total} item{total === 1 ? "" : "s"} · one eBay call each ({total} of
-          your 5,000 daily quota). Uses <strong>asking</strong> prices;
-          low-confidence matches are reported but not saved.
+          {tcg.length > 0 && (
+            <>
+              <strong>{tcg.length}</strong> linked to the catalogue use{" "}
+              <strong>TCGplayer&apos;s market price</strong> (what the product
+              recently sold for), no eBay call.{" "}
+            </>
+          )}
+          {ebayQueue.length} other{ebayQueue.length === 1 ? "" : "s"} use eBay,
+          one call each ({ebayQueue.length} of your 5,000 daily quota); that is
+          what sellers are <strong>asking</strong>, and low-confidence matches
+          are reported but not saved.
         </div>
 
         {onCooldown.length > 0 && (
@@ -252,7 +265,7 @@ export function BulkPriceRefresh({
                       ? formatAmount(r.priceCents, r.currency)
                       : "-"}
                     <span className="text-[10px] text-zinc-500 ml-1.5">
-                      {r.confidence}
+                      {r.source === "tcgplayer" ? "TCGplayer" : r.confidence}
                     </span>
                   </span>
                 </div>

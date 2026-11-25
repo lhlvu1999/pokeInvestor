@@ -8,15 +8,18 @@ optional login.
 
 What is in it, by area (the header shows the same grouping):
 
-- **Stock:** dashboard, items (with pictures, tags, sell targets), watchlist,
+- **Stock:** dashboard, items (with pictures, tags, sell targets and price floors), watchlist,
   offer builder, share snapshot, history, stock count, import (CSV and screenshots).
 - **Analytics:** returns and a comparison with the market, exposure, graded slabs
   against raw cards, a yearly sales report with a tax-friendly CSV, stock on any
   day, and set and market insights from the catalogue.
 - **Catalogue:** English and Japanese sets with sealed and card prices and history
   (TCGCSV), set insights, a release calendar, linking your items to it.
+  New items are linked as you add them: the New item form and the transaction
+  picker suggest catalogue matches, and a clear match is linked automatically.
 - **Pipeline** (separate Python service): YouTube insights, catalogue sync and
-  linking, price alerts via webhook, and a weekly summary. See `pipeline/README.md`.
+  linking, price alerts via webhook (buy targets, sell targets, price floors), and a
+  weekly summary. See `pipeline/README.md`.
 - **Settings and admin:** display currency, cost method, backup and restore,
   schema sync, bulk tools, and a **setup checklist** (`/settings/checklist`) of the
   few things only you can do (backup, unexplained ₫0 sales, unmatched slabs,
@@ -207,6 +210,19 @@ on every read, so edits and out-of-order entries are handled without stored
 snapshots. The pipeline has its own tested copy of the replay
 (`pipeline/src/poke_pipeline/replay.py`), checked against the app's with shared
 vectors.
+
+## Where market prices come from
+
+An item linked to a sealed product in the catalogue is priced from **TCGplayer's
+market price**, which follows what the product recently sold for. It is converted
+to the item's currency at today's rate. This happens on **Update all prices**, on
+the scheduled refresh, when you link an item, and when you buy a linked item that
+has no price yet. A catalogue price older than a week is ignored.
+
+Everything the catalogue cannot price (graded slabs, single cards, unlinked items,
+products with no recent price) falls back to the eBay estimate below. eBay shows
+what sellers are **asking**, not what sold, so it is the second choice. Linked
+items never use up eBay quota.
 
 ## eBay price estimates
 

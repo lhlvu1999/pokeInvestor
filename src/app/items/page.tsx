@@ -37,6 +37,7 @@ export default async function ItemsPage() {
           <BulkPriceRefresh
             targets={refreshTargets.eligible}
             onCooldown={refreshTargets.onCooldown}
+            tcg={refreshTargets.tcg}
           />
         </div>
       </div>
