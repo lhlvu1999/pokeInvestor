@@ -10,7 +10,8 @@ For the full architecture see [`../docs/youtube-pipeline.md`](../docs/youtube-pi
 ## Quickstart (local)
 
 1. Install `uv` (one-time): `brew install uv`
-2. From the repo root: `cd pipeline && uv sync`
+2. From the repo root: `cd pipeline && uv sync` (add `--extra whisper` if you use
+   `TRANSCRIPT_METHOD=whisper`; it is optional now)
 3. Make sure the DB is up: `docker compose up -d` (run from repo root)
 4. Add a source in the Next.js `/sources` page
 5. Run the full pipeline:

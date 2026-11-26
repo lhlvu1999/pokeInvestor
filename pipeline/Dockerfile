@@ -15,12 +15,12 @@ WORKDIR /app
 # Install dependencies first (cacheable layer).
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-dev --extra whisper --no-install-project
 
 # Install the project itself.
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --extra whisper
 
 
 FROM python:3.12-slim-bookworm

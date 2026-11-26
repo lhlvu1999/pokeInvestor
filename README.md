@@ -258,6 +258,35 @@ nothing more than start a refresh. With the login **off**, the app must also
 accept the scheduler's host name (`APP_ALLOWED_HOSTS`). Use https if the scheduler
 reaches the app over a network you don't control.
 
+## Deploying on Vercel
+
+Two Vercel projects from this repo, plus a hosted Postgres. Argo is not used there:
+Vercel Schedules do its job.
+
+| Project         | Root directory | What it is                                                                                                                                              |
+| --------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `poke-investor` | `/`            | The Next.js app. `vercel.json` schedules `refresh-prices` (daily 01:00 UTC) straight on the app.                                                        |
+| `poke-pipeline` | `pipeline/`    | One Python function, `api/cron.py`, that runs a pipeline phase per call. `pipeline/vercel.json` holds the schedules (the same phases as `deploy/argo`). |
+
+- **Database:** a Postgres reachable from both projects (Neon via the Vercel Marketplace
+  works). The app uses the pooled `DATABASE_URL`; the pipeline prefers
+  `DATABASE_URL_UNPOOLED`. Fill a new database with `npm run db:migrate` (or copy an
+  existing one with `pg_dump | psql`).
+- **Secrets (production):** the app needs `APP_PASSWORD` (set it before the first deploy,
+  or the app is open to anyone), `CRON_TOKEN` and `CRON_SECRET` with the **same** value
+  (Vercel sends `CRON_SECRET` as the bearer token), and optionally `APP_SESSION_SECRET`
+  and the eBay keys. The pipeline needs its own `CRON_SECRET`; its function refuses every
+  call without it.
+- **Deploy:** `vercel deploy --prod` from `/` and again from `pipeline/`.
+- **Run a job now:** `vercel schedules invoke <name>` (from the matching folder), then
+  `vercel schedules executions list <name>`.
+- **Limits that matter:** a function runs at most 300 seconds, a request body is capped
+  at 4.5 MB (large screenshot imports or backup restores through the web UI can hit it),
+  and Hobby schedules run at most every 15 minutes. Whisper (`TRANSCRIPT_METHOD=whisper`)
+  and a local LLM (`OPENAI_BASE_URL=http://localhost…`) cannot run there: transcripts use
+  YouTube captions, and `insights` needs an LLM the function can reach over the internet.
+  Whisper is an optional install now (`uv sync --extra whisper`).
+
 ## PriceCharting integration
 
 Per-item live price refresh is wired up. To enable:
