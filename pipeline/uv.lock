@@ -770,7 +770,6 @@ name = "poke-pipeline"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "faster-whisper" },
     { name = "feedparser" },
     { name = "httpx" },
     { name = "openai" },
@@ -784,6 +783,11 @@ dependencies = [
     { name = "yt-dlp" },
 ]
 
+[package.optional-dependencies]
+whisper = [
+    { name = "faster-whisper" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
@@ -793,7 +797,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "faster-whisper", specifier = ">=1.0.3" },
+    { name = "faster-whisper", marker = "extra == 'whisper'", specifier = ">=1.0.3" },
     { name = "feedparser", specifier = ">=6.0.11" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "openai", specifier = ">=1.54.0" },
@@ -806,6 +810,7 @@ requires-dist = [
     { name = "youtube-transcript-api", specifier = ">=0.6.2" },
     { name = "yt-dlp", specifier = ">=2025.1.15" },
 ]
+provides-extras = ["whisper"]
 
 [package.metadata.requires-dev]
 dev = [

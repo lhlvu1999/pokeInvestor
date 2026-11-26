@@ -1,0 +1,10 @@
+# Not part of the web app's deployment (the pipeline is its own Vercel project).
+pipeline
+docs
+tests
+.claude
+.env
+.env.*
+*.csv
+.next
+node_modules

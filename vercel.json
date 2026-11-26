@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "schedules": {
+    "refresh-prices": {
+      "schedule": "0 1 * * *",
+      "path": "/api/cron/refresh-prices",
+      "requestMethod": "POST"
+    }
+  }
+}

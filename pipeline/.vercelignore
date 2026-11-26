@@ -1,0 +1,13 @@
+# Keep the function small: only api/, src/ and the dependency files are needed.
+.venv
+tests
+deploy
+.env
+.env.*
+.pytest_cache
+.ruff_cache
+.mypy_cache
+__pycache__
+*.pyc
+README.md
+Dockerfile

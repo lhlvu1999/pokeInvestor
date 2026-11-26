@@ -6,6 +6,9 @@ import { loginThrottle, refuseCrossSite } from "@/lib/server/auth";
 import { runScheduledRefresh } from "@/lib/server/scheduled_refresh";
 
 export const dynamic = "force-dynamic";
+// A full refresh makes about one eBay call per held item; allow the longest a
+// Vercel function may run on any plan (it is ignored everywhere else).
+export const maxDuration = 300;
 
 const no = (status: number, error: string, extra: Record<string, unknown> = {}) =>
   NextResponse.json({ error, ...extra }, { status, headers: { "Cache-Control": "no-store" } });
